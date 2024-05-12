@@ -18,7 +18,6 @@
 set(LOCAL_HEADERS
     check.h
     common.h
-    d3d_common.h
     geometry.h
     graphicsapi.h
     graphicsplugin.h
@@ -31,12 +30,7 @@ set(LOCAL_HEADERS
 	stb_image.h
 )
 set(LOCAL_SOURCE
-    d3d_common.cpp
-    graphicsplugin_d3d11.cpp
-    graphicsplugin_d3d12.cpp
     graphicsplugin_factory.cpp
-    graphicsplugin_opengl.cpp
-    graphicsplugin_opengles.cpp
     graphicsplugin_vulkan.cpp
     logger.cpp
     main.cpp
@@ -63,7 +57,7 @@ if(ANDROID)
 
     # Only for Android because it lacks a command line
     set(HELLOXR_DEFAULT_GRAPHICS_PLUGIN
-        "OpenGLES"
+        "Vulkan"
         CACHE
             STRING
             "Which graphics plugin should be used by default for Hello XR artifacts?"
