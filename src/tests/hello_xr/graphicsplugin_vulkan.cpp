@@ -206,18 +206,8 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
 }
 
 /* VkImage*/ void createTextureImage(VkDevice device, VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
-                                     VkImage textureImage, VkQueue graphicsQueue, bool is_left) {
+                                     VkImage textureImage, VkQueue graphicsQueue, const cv::Mat& image) {
     int texWidth, texHeight, texChannels;
-
-    constexpr char* left_eye = "textures/left.png";
-    constexpr char* right_eye = "textures/right.png";
-
-    std::string filename = std::string(right_eye);
-    if (is_left) {
-        filename = std::string(left_eye);
-    }
-    cv::Mat image = cv::imread(filename, cv::IMREAD_COLOR);
-    cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
 
     texWidth = image.cols;
     texHeight = image.rows;
@@ -1819,7 +1809,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     }
 
     void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-                    int64_t /*swapchainFormat*/, const std::vector<Cube>& /*cubes*/, bool is_left) override {
+                    int64_t /*swapchainFormat*/, const cv::Mat& image_mat) override {
         CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
 
         auto swapchainContext = m_swapchainImageContextMap[swapchainImage];
@@ -1836,7 +1826,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
         auto& image = swapchainContext->swapchainImages[imageIndex].image;
 
-        createTextureImage(m_vkDevice, m_vkPhysicalDevice, m_cmdBuffer.pool, image, m_vkQueue, is_left);
+        createTextureImage(m_vkDevice, m_vkPhysicalDevice, m_cmdBuffer.pool, image, m_vkQueue, image_mat);
 
         m_cmdBuffer.End();
         m_cmdBuffer.Exec(m_vkQueue);

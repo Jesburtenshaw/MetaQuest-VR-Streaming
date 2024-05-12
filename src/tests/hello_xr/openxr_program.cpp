@@ -15,6 +15,8 @@
 #include <cmath>
 #include <set>
 
+#include <opencv2/opencv.hpp>
+
 namespace {
 
 #if !defined(XR_USE_PLATFORM_WIN32)
@@ -979,8 +981,18 @@ struct OpenXrProgram : IOpenXrProgram {
 
             bool is_left = i == 0;
 
+            constexpr char* left_eye = "textures/left.png";
+            constexpr char* right_eye = "textures/right.png";
+
+            std::string filename = std::string(right_eye);
+            if (is_left) {
+                filename = std::string(left_eye);
+            }
+            cv::Mat image = cv::imread(filename, cv::IMREAD_COLOR);
+            cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
+
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
-            m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, cubes, is_left);
+            m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, image);
 
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
@@ -1021,6 +1033,8 @@ struct OpenXrProgram : IOpenXrProgram {
     InputState m_input;
 
     const std::set<XrEnvironmentBlendMode> m_acceptableBlendModes;
+
+    cv::VideoCapture m_videoCapture;
 };
 }  // namespace
 
