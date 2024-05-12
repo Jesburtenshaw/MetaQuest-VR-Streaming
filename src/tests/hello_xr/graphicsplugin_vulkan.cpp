@@ -85,7 +85,6 @@ void transitionImageLayout(VkImage image, VkImageLayout oldLayout, VkImageLayout
 
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;
-    VkDependencyFlags dependencyFlags = VK_DEPENDENCY_VIEW_LOCAL_BIT;
 
     if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
         barrier.srcAccessMask = 0;
@@ -1804,7 +1803,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     }
 
     void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-                    int64_t /*swapchainFormat*/, const std::vector<Cube>& cubes) override {
+                    int64_t /*swapchainFormat*/, const std::vector<Cube>& /* cubes*/) override {
         CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
 
         auto swapchainContext = m_swapchainImageContextMap[swapchainImage];
