@@ -14,6 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# Hint the path to the OpenCVConfig.cmake file
+set(OpenCV_DIR "D:/opencv/opencv/build/")
+find_package(OpenCV REQUIRED)
+
 
 set(LOCAL_HEADERS
     check.h
@@ -27,7 +31,6 @@ set(LOCAL_HEADERS
     pch.h
     platformdata.h
     platformplugin.h
-	stb_image.h
 )
 set(LOCAL_SOURCE
     graphicsplugin_factory.cpp
@@ -90,6 +93,7 @@ source_group("Headers" FILES ${LOCAL_HEADERS})
 source_group("Shaders" FILES ${VULKAN_SHADERS})
 
 target_link_libraries(hello_xr PRIVATE OpenXR::openxr_loader)
+target_link_libraries(hello_xr PRIVATE ${OpenCV_LIBS})
 
 compile_glsl(run_hello_xr_glsl_compiles ${VULKAN_SHADERS})
 
@@ -105,9 +109,11 @@ target_include_directories(
         "${PROJECT_SOURCE_DIR}/external/include"
         # For including compiled shaders
         "${CMAKE_CURRENT_BINARY_DIR}"
+		# OpenCV
+		${OpenCV_INCLUDE_DIRS}
 )
 
-target_link_libraries(hello_xr PRIVATE OpenXR::openxr_loader)
+target_link_libraries(hello_xr PRIVATE OpenXR::openxr_loader )
 
 if(GLSLANG_VALIDATOR AND NOT GLSLC_COMMAND)
     target_compile_definitions(hello_xr PRIVATE USE_GLSLANGVALIDATOR)

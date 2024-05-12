@@ -8,8 +8,10 @@
 #include "graphicsplugin.h"
 #include "options.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+//#define STB_IMAGE_IMPLEMENTATION
+//#include "stb_image.h"
+
+#include <opencv2/opencv.hpp>
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 #include <common/vulkan_debug_object_namer.hpp>
@@ -214,10 +216,16 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
     if (is_left) {
         filename = std::string(left_eye);
     }
-    stbi_uc* pixels = stbi_load(filename.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    cv::Mat image = cv::imread(filename, cv::IMREAD_COLOR);
+    cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
+
+    texWidth = image.cols;
+    texHeight = image.rows;
+    texChannels = image.channels();
+    //stbi_uc* pixels = stbi_load(filename.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
-    if (!pixels) {
+    if (image.empty()) {
         throw std::runtime_error("failed to load texture image!");
     }
 
@@ -228,10 +236,10 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
 
     void* data;
     vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-    memcpy(data, pixels, static_cast<size_t>(imageSize));
+    memcpy(data, image.data, static_cast<size_t>(imageSize));
     vkUnmapMemory(device, stagingBufferMemory);
 
-    stbi_image_free(pixels);
+    //stbi_image_free(pixels);
     
     /*VkDeviceMemory textureImageMemory;
     createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
