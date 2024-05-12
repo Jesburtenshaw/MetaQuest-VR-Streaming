@@ -97,7 +97,9 @@ struct OpenXrProgram : IOpenXrProgram {
           m_platformPlugin(platformPlugin),
           m_graphicsPlugin(graphicsPlugin),
           m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE, XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
-                                 XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {}
+                                 XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
+        m_videoCapture = cv::VideoCapture("textures/video.mp4");
+    }
 
     ~OpenXrProgram() override {
         if (m_input.actionSet != XR_NULL_HANDLE) {
@@ -981,15 +983,20 @@ struct OpenXrProgram : IOpenXrProgram {
 
             bool is_left = i == 0;
 
-            constexpr char* left_eye = "textures/left.png";
-            constexpr char* right_eye = "textures/right.png";
-
-            std::string filename = std::string(right_eye);
-            if (is_left) {
-                filename = std::string(left_eye);
+            
+            cv::Mat image;
+            bool success = m_videoCapture.read(image);
+            if (!success) {
+                Log::Write(Log::Level::Error, "Failed to read frame from video capture. Seeking to begin and retrying...");
+                m_videoCapture.set(cv::CAP_PROP_POS_FRAMES, 0);
+                success = m_videoCapture.read(image);
+                if (!success) {
+                    Log::Write(Log::Level::Error, "Failed to read frame from video capture");
+                    return false;
+                }
             }
-            cv::Mat image = cv::imread(filename, cv::IMREAD_COLOR);
             cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
+            cv::putText(image, is_left ? "Left" : "Right", cv::Point(10, 130), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
 
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
             m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, image);
