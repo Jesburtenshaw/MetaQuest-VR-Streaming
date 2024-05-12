@@ -28,6 +28,7 @@ set(LOCAL_HEADERS
     pch.h
     platformdata.h
     platformplugin.h
+	stb_image.h
 )
 set(LOCAL_SOURCE
     d3d_common.cpp
