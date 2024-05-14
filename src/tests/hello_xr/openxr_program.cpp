@@ -98,7 +98,7 @@ struct OpenXrProgram : IOpenXrProgram {
           m_graphicsPlugin(graphicsPlugin),
           m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE, XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                  XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
-        m_videoCapture = cv::VideoCapture("textures/video.mp4");
+        m_videoCapture = cv::VideoCapture("textures/test.sdp", cv::CAP_GSTREAMER);
     }
 
     ~OpenXrProgram() override {
