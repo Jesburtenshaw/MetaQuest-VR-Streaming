@@ -16,6 +16,7 @@
 #include <set>
 
 #include <opencv2/opencv.hpp>
+//#include <gst/gst.h>
 
 namespace {
 
@@ -98,7 +99,10 @@ struct OpenXrProgram : IOpenXrProgram {
           m_graphicsPlugin(graphicsPlugin),
           m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE, XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                  XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
-        m_videoCapture = cv::VideoCapture("textures/test.sdp", cv::CAP_GSTREAMER);
+
+
+        m_videoCapture =
+            cv::VideoCapture("udpsrc port=5004 caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! appsink", cv::CAP_GSTREAMER);
     }
 
     ~OpenXrProgram() override {
