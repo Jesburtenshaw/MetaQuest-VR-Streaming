@@ -16,7 +16,6 @@
 #
 # Hint the path to the OpenCVConfig.cmake file
 set(OpenCV_DIR "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
-#set(CMAKE_PREFIX_PATH "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
 find_package(OpenCV REQUIRED java)
 
 
@@ -73,17 +72,17 @@ if(ANDROID)
     )
 
     # Now handle the value, normally provided by Gradle
-#    if(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "OpenGLES")
-#        message(STATUS "hello_xr will default to OpenGL ES graphics plugin")
-#        target_compile_definitions(
-#            hello_xr PRIVATE DEFAULT_GRAPHICS_PLUGIN_OPENGLES
-#        )
-#    elseif(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "Vulkan")
+    if(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "OpenGLES")
+        message(STATUS "hello_xr will default to OpenGL ES graphics plugin")
+        target_compile_definitions(
+            hello_xr PRIVATE DEFAULT_GRAPHICS_PLUGIN_OPENGLES
+        )
+    elseif(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "Vulkan")
         message(STATUS "hello_xr will default to Vulkan graphics plugin")
         target_compile_definitions(
             hello_xr PRIVATE DEFAULT_GRAPHICS_PLUGIN_VULKAN
         )
-    #endif()
+    endif()
 
 else()
     add_executable(hello_xr ${LOCAL_SOURCE} ${LOCAL_HEADERS} ${VULKAN_SHADERS})

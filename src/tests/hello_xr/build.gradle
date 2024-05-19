@@ -36,11 +36,10 @@ android {
                         '-DBUILD_TESTS=ON',
                         '-DBUILD_LOADER=ON',
                         '-DBUILD_CONFORMANCE_TESTS=OFF',
-                        '-DBUILD_ALL_EXTENSIONS=ON'//,
-                        //"-DOpenCV_DIR='D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni",
-                        //"-DANDROID_ARM_NEON=TRUE"
+                        '-DBUILD_ALL_EXTENSIONS=ON',
+                        "-DANDROID_STL=c++_shared"
                 
-                targets "openxr_loader", "hello_xr"//, "opencv"
+                targets "openxr_loader", "hello_xr"
             }
         }
     }
@@ -89,11 +88,6 @@ android {
     }
     
 }
-
-//dependencies {
-//    implementation fileTree(dir: 'libs', include: ['*.jar'])
-//    implementation project(':opencv')
-//}
 
 // For signing of release binaries - env var must contain an absolute path
 // CI always does this.

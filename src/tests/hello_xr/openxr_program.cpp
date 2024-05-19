@@ -998,7 +998,7 @@ struct OpenXrProgram : IOpenXrProgram {
 //                }
 //            }
             ///cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
-            cv::putText(image, is_left ? "Left" : "Right", cv::Point(10, 130), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
+            cv::putText(image, is_left ? "Left" : "Right", cv::Point(500, 500 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
 
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
             m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, image);
