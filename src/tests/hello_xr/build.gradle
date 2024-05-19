@@ -6,7 +6,8 @@
 // to build the "hello_xr" sample application
 
 plugins {
-    id 'com.android.application' version '7.4.2'
+    id 'com.android.application' version '8.3.1'
+    id 'org.jetbrains.kotlin.android' version '1.6.21' apply false
 }
 
 
@@ -15,8 +16,8 @@ project.ext.repoRoot = file('../../../')
 apply from: file('../../version.gradle')
 
 android {
-    compileSdk 33
-    ndkVersion "23.2.8568313"
+    compileSdk 32
+    ndkVersion "26.3.11579264"
     buildToolsVersion = "34.0.0"
     namespace 'org.khronos.openxr.hello_xr'
 
@@ -30,12 +31,16 @@ android {
 
         externalNativeBuild {
             cmake {
+                cppFlags "-std=c++11 -frtti -fexceptions"
                 arguments '-DBUILD_API_LAYERS=OFF',
                         '-DBUILD_TESTS=ON',
                         '-DBUILD_LOADER=ON',
                         '-DBUILD_CONFORMANCE_TESTS=OFF',
-                        '-DBUILD_ALL_EXTENSIONS=ON'
-                targets "openxr_loader", "hello_xr"
+                        '-DBUILD_ALL_EXTENSIONS=ON'//,
+                        //"-DOpenCV_DIR='D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni",
+                        //"-DANDROID_ARM_NEON=TRUE"
+                
+                targets "openxr_loader", "hello_xr"//, "opencv"
             }
         }
     }
@@ -82,7 +87,13 @@ android {
             resValue "string", "app_name", "Hello XR (Vulkan)"
         }
     }
+    
 }
+
+//dependencies {
+//    implementation fileTree(dir: 'libs', include: ['*.jar'])
+//    implementation project(':opencv')
+//}
 
 // For signing of release binaries - env var must contain an absolute path
 // CI always does this.

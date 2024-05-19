@@ -15,8 +15,9 @@
 # limitations under the License.
 #
 # Hint the path to the OpenCVConfig.cmake file
-set(OpenCV_DIR "D:/opencv/opencv/build/")
-find_package(OpenCV REQUIRED)
+set(OpenCV_DIR "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
+#set(CMAKE_PREFIX_PATH "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
+find_package(OpenCV REQUIRED java)
 
 
 set(LOCAL_HEADERS
@@ -72,17 +73,17 @@ if(ANDROID)
     )
 
     # Now handle the value, normally provided by Gradle
-    if(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "OpenGLES")
-        message(STATUS "hello_xr will default to OpenGL ES graphics plugin")
-        target_compile_definitions(
-            hello_xr PRIVATE DEFAULT_GRAPHICS_PLUGIN_OPENGLES
-        )
-    elseif(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "Vulkan")
+#    if(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "OpenGLES")
+#        message(STATUS "hello_xr will default to OpenGL ES graphics plugin")
+#        target_compile_definitions(
+#            hello_xr PRIVATE DEFAULT_GRAPHICS_PLUGIN_OPENGLES
+#        )
+#    elseif(HELLOXR_DEFAULT_GRAPHICS_PLUGIN STREQUAL "Vulkan")
         message(STATUS "hello_xr will default to Vulkan graphics plugin")
         target_compile_definitions(
             hello_xr PRIVATE DEFAULT_GRAPHICS_PLUGIN_VULKAN
         )
-    endif()
+    #endif()
 
 else()
     add_executable(hello_xr ${LOCAL_SOURCE} ${LOCAL_HEADERS} ${VULKAN_SHADERS})
@@ -92,8 +93,7 @@ set_target_properties(hello_xr PROPERTIES FOLDER ${SAMPLES_FOLDER})
 source_group("Headers" FILES ${LOCAL_HEADERS})
 source_group("Shaders" FILES ${VULKAN_SHADERS})
 
-target_link_libraries(hello_xr PRIVATE OpenXR::openxr_loader)
-target_link_libraries(hello_xr PRIVATE ${OpenCV_LIBS})
+target_link_libraries(hello_xr PRIVATE OpenXR::openxr_loader ${OpenCV_LIBS})
 
 compile_glsl(run_hello_xr_glsl_compiles ${VULKAN_SHADERS})
 
@@ -113,7 +113,6 @@ target_include_directories(
 		${OpenCV_INCLUDE_DIRS}
 )
 
-target_link_libraries(hello_xr PRIVATE OpenXR::openxr_loader )
 
 if(GLSLANG_VALIDATOR AND NOT GLSLC_COMMAND)
     target_compile_definitions(hello_xr PRIVATE USE_GLSLANGVALIDATOR)
