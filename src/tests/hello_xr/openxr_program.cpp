@@ -16,7 +16,7 @@
 #include <set>
 
 #include <opencv2/opencv.hpp>
-//#include <gst/gst.h>
+#include <gst/gst.h>
 
 namespace {
 
@@ -99,8 +99,9 @@ struct OpenXrProgram : IOpenXrProgram {
           m_graphicsPlugin(graphicsPlugin),
           m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE, XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                  XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
-        //m_videoCapture =
-        //    cv::VideoCapture("udpsrc port=5004 caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! appsink", cv::CAP_GSTREAMER);
+        m_videoCapture =
+            cv::VideoCapture("udpsrc port=5004 caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! appsink", cv::CAP_GSTREAMER);
+        //cv::VideoCapture(0);
     }
 
     ~OpenXrProgram() override {
@@ -986,18 +987,18 @@ struct OpenXrProgram : IOpenXrProgram {
             bool is_left = i == 0;
 
             
-            cv::Mat image = cv::Mat(cv::Size(1000,1000), CV_8UC4, cv::Scalar(0, 0, 0, 200));
-//            bool success = m_videoCapture.read(image);
-//            if (!success) {
-//                Log::Write(Log::Level::Error, "Failed to read frame from video capture. Seeking to begin and retrying...");
-//                m_videoCapture.set(cv::CAP_PROP_POS_FRAMES, 0);
-//                success = m_videoCapture.read(image);
-//                if (!success) {
-//                    Log::Write(Log::Level::Error, "Failed to read frame from video capture");
-//                    return false;
-//                }
-//            }
-            ///cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
+            cv::Mat image;
+            bool success = m_videoCapture.read(image);
+            if (!success) {
+                Log::Write(Log::Level::Error, "Failed to read frame from video capture. Seeking to begin and retrying...");
+                m_videoCapture.set(cv::CAP_PROP_POS_FRAMES, 0);
+                success = m_videoCapture.read(image);
+                if (!success) {
+                    Log::Write(Log::Level::Error, "Failed to read frame from video capture");
+                    return false;
+                }
+            }
+            cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
             cv::putText(image, is_left ? "Left" : "Right", cv::Point(500, 500 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
 
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
@@ -1043,7 +1044,7 @@ struct OpenXrProgram : IOpenXrProgram {
 
     const std::set<XrEnvironmentBlendMode> m_acceptableBlendModes;
 
-    //cv::VideoCapture m_videoCapture;
+    cv::VideoCapture m_videoCapture;
 };
 }  // namespace
 

@@ -51,9 +51,6 @@ android {
         Vulkan {
             res.srcDir 'android_resources/vulkan'
         }
-        OpenGLES {
-            res.srcDir 'android_resources/opengles'
-        }
     }
 
     buildTypes {
@@ -66,18 +63,11 @@ android {
         cmake {
             path "${project.repoRoot}/CMakeLists.txt"
         }
-    }
+    }    
 
     flavorDimensions 'api'
 
     productFlavors {
-        OpenGLES {
-            dimension 'api'
-            applicationIdSuffix '.opengles'
-            externalNativeBuild.cmake.arguments += '-DHELLOXR_DEFAULT_GRAPHICS_PLUGIN=OpenGLES'
-
-            resValue "string", "app_name", "Hello XR (OpenGL ES)"
-        }
         Vulkan {
             dimension 'api'
             applicationIdSuffix '.vulkan'
