@@ -17,6 +17,12 @@
 
 #include <opencv2/opencv.hpp>
 #include <gst/gst.h>
+#include <gio/gio.h>
+#include <gst/gstbus.h>
+#include <gst/app/gstappsink.h>
+
+#include "nativelib/static_gstreamer.h"
+
 
 namespace {
 
@@ -99,9 +105,69 @@ struct OpenXrProgram : IOpenXrProgram {
           m_graphicsPlugin(graphicsPlugin),
           m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE, XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                  XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
-        m_videoCapture =
-            cv::VideoCapture("udpsrc port=5004 caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! appsink", cv::CAP_GSTREAMER);
-        //cv::VideoCapture(0);
+        char *version_utf8 = gst_version_string ();
+
+        
+        
+            Log::Write(Log::Level::Verbose, "Initializing gstreamer");
+
+            /* Initialize GStreamer */
+            //
+
+            gst_init_static_plugins();
+
+            gst_init (nullptr, nullptr);
+        
+            Log::Write(Log::Level::Info, "Creating the pipeline");
+            /* Build the pipeline */
+
+        m_dataContext = g_main_context_new ();
+        g_main_context_push_thread_default(m_dataContext);
+        Log::Write(Log::Level::Info, "Created context");
+            GError *error = nullptr;
+            m_pipeline =
+                    gst_parse_launch
+                            ("videotestsrc pattern=snow ! video/x-raw,width=1680,height=1760 ! appsink",
+                             &error);
+        Log::Write(Log::Level::Info, "Checking the pipeline");
+            if (error) {
+                Log::Write(Log::Level::Info, "pipeline not created");
+                gchar *message = g_strdup_printf("Unable to build pipeline: %s", error->message);
+                g_clear_error (&error);
+                Log::Write(Log::Level::Error, message);
+                g_free (message);
+            }
+        Log::Write(Log::Level::Info, "Getting the appsink");
+            m_appSink = (GstAppSink *) (gst_bin_get_by_name((GstBin *) (m_pipeline), "appsink0"));
+            if (!m_appSink) {
+                Log::Write(Log::Level::Error, "couldn't find appsink");                
+            }
+            
+            
+
+            Log::Write(Log::Level::Info, "Setting pipeline to playing");
+            /* Start playing */
+            gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
+            Log::Write(Log::Level::Info, "First query");
+            /* Wait until error or EOS */
+            m_bus = gst_element_get_bus(m_pipeline);
+            m_msg = gst_bus_timed_pop_filtered(m_bus, 10000000,
+                                               (GstMessageType) (GST_MESSAGE_ERROR |
+                                                                 GST_MESSAGE_EOS));
+            if (m_msg) {
+                /* See next tutorial for proper error message handling/parsing */
+                if (GST_MESSAGE_TYPE (m_msg) == GST_MESSAGE_ERROR) {
+                    g_error ("An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
+                             "variable set for more details.");
+                }
+            }
+
+            Log::Write(Log::Level::Warning, "All initialized!");
+
+            //m_videoCapture =
+            //    cv::VideoCapture("udpsrc port=5004 caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! appsink", cv::CAP_GSTREAMER);
+            //cv::VideoCapture(0);
+       
     }
 
     ~OpenXrProgram() override {
@@ -131,6 +197,14 @@ struct OpenXrProgram : IOpenXrProgram {
         if (m_instance != XR_NULL_HANDLE) {
             xrDestroyInstance(m_instance);
         }
+        /* Free resources */
+        gst_message_unref (m_msg);
+        gst_object_unref (m_bus);
+        g_main_context_pop_thread_default(m_dataContext);
+        g_main_context_unref (m_dataContext);
+        gst_element_set_state (m_pipeline, GST_STATE_NULL);
+        gst_object_unref(m_appSink);
+        gst_object_unref (m_pipeline);
     }
 
     static void LogLayersAndExtensions() {
@@ -987,25 +1061,86 @@ struct OpenXrProgram : IOpenXrProgram {
             bool is_left = i == 0;
 
             
-            cv::Mat image;
-            bool success = m_videoCapture.read(image);
-            if (!success) {
-                Log::Write(Log::Level::Error, "Failed to read frame from video capture. Seeking to begin and retrying...");
-                m_videoCapture.set(cv::CAP_PROP_POS_FRAMES, 0);
-                success = m_videoCapture.read(image);
-                if (!success) {
-                    Log::Write(Log::Level::Error, "Failed to read frame from video capture");
-                    return false;
+            cv::Mat image;// = cv::Mat(cv::Size(1680,1760), CV_8UC4, cv::Scalar(255,255,0,255));
+            GstMapInfo info;
+            GstBuffer* buffer;
+            GstSample* sample;
+            auto mapped = false;
+
+            m_msg = gst_bus_timed_pop_filtered (m_bus, 10000000, (GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
+            if (m_msg) {
+                /* See next tutorial for proper error message handling/parsing */
+                if (GST_MESSAGE_TYPE (m_msg) == GST_MESSAGE_ERROR) {
+                    Log::Write(Log::Level::Error, "An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
+                             "variable set for more details.");
                 }
+                
+                std::cout<<"showing red color as end or error has occurred"<<std::endl;
+
+                image = cv::Mat(cv::Size(1680,1760), CV_8UC4, cv::Scalar(255,255,0,100));
+                cv::putText(image, "Error or End Video", cv::Point(1680/2, 1760/2 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
+            } else {
+                std::cout<<"Getting sample"<<std::endl;
+                sample = gst_app_sink_pull_sample(m_appSink);
+                if (sample) {
+                    std::cout<<"getting buffer"<<std::endl;
+                    buffer = gst_sample_get_buffer(sample);
+                    if (buffer) {
+                        std::cout<<"mapping"<<std::endl;
+                        //gst_buffer_ref(buffer);
+                        mapped = gst_buffer_map(buffer, &info, GST_MAP_READ);
+                        if (mapped) {
+                            int type = CV_8UC4;
+                            cv::ColorConversionCodes conversion_code;
+                            if (info.size == 1680 * 1760) {
+                                type = CV_8UC1;
+                                conversion_code = cv::COLOR_GRAY2RGBA;
+                            } else if (info.size == 1680 * 1760 * 3) {
+                                type = CV_8UC3;
+                                conversion_code = cv::COLOR_RGB2RGBA;
+                            } else if (info.size == 1680 * 1760 * 4) {
+                                type = CV_8UC4;
+                            }
+                            image = cv::Mat(cv::Size(1680, 1760), type, info.data);
+
+                            if (type != CV_8UC4) {
+                                cv::cvtColor(image, image, conversion_code);
+                            }
+                        }
+                    }                    
+                } else {
+                    image = cv::Mat(cv::Size(1680, 1760), CV_8UC4, cv::Scalar(0,0,200,50));
+                }               
             }
-            cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
-            cv::putText(image, is_left ? "Left" : "Right", cv::Point(500, 500 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
+            
+//            bool success = m_videoCapture.read(image);
+//            if (!success) {
+//                Log::Write(Log::Level::Error, "Failed to read frame from video capture. Seeking to begin and retrying...");
+//                m_videoCapture.set(cv::CAP_PROP_POS_FRAMES, 0);
+//                success = m_videoCapture.read(image);
+//                if (!success) {
+//                    Log::Write(Log::Level::Error, "Failed to read frame from video capture");
+//                    return false;
+//                }
+//            }
+//            cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
+//            cv::putText(image, is_left ? "Left" : "Right", cv::Point(1000, 1000 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
 
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
             m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, image);
 
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
+            
+            if (!m_msg) {
+                if (buffer && mapped) {
+                    gst_buffer_unmap(buffer, &info);
+                }                
+                if (sample) {
+                    gst_sample_unref(sample);
+                }
+                //image.release();
+            }
         }
 
         layer.space = m_appSpace;
@@ -1044,7 +1179,12 @@ struct OpenXrProgram : IOpenXrProgram {
 
     const std::set<XrEnvironmentBlendMode> m_acceptableBlendModes;
 
-    cv::VideoCapture m_videoCapture;
+    //cv::VideoCapture m_videoCapture;
+    GstElement* m_pipeline;
+    GstBus* m_bus;
+    GstMessage* m_msg;
+    GstAppSink* m_appSink;
+    GMainContext* m_dataContext;
 };
 }  // namespace
 
