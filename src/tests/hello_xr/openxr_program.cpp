@@ -105,69 +105,76 @@ struct OpenXrProgram : IOpenXrProgram {
           m_graphicsPlugin(graphicsPlugin),
           m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE, XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                  XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
-        char *version_utf8 = gst_version_string ();
+        char *version_utf8 = gst_version_string();
 
-        
-        
-            Log::Write(Log::Level::Verbose, "Initializing gstreamer");
 
-            /* Initialize GStreamer */
-            //
+        Log::Write(Log::Level::Verbose, "Initializing gstreamer");
 
-            gst_init_static_plugins();
+        /* Initialize GStreamer */
+        //
 
-            gst_init (nullptr, nullptr);
-        
-            Log::Write(Log::Level::Info, "Creating the pipeline");
-            /* Build the pipeline */
+        gst_init_static_plugins();
 
-        m_dataContext = g_main_context_new ();
+        gst_init(nullptr, nullptr);
+
+        Log::Write(Log::Level::Info, "Creating the pipeline");
+        /* Build the pipeline */
+
+        m_dataContext = g_main_context_new();
         g_main_context_push_thread_default(m_dataContext);
         Log::Write(Log::Level::Info, "Created context");
-            GError *error = nullptr;
-            m_pipeline =
-                    gst_parse_launch
-                            ("videotestsrc pattern=snow ! video/x-raw,width=1680,height=1760 ! appsink",
-                             &error);
+        GError *error = nullptr;
+        m_pipeline =
+                gst_parse_launch
+                        ("udpsrc port=5004 caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! appsink",
+                         &error);
         Log::Write(Log::Level::Info, "Checking the pipeline");
-            if (error) {
-                Log::Write(Log::Level::Info, "pipeline not created");
-                gchar *message = g_strdup_printf("Unable to build pipeline: %s", error->message);
-                g_clear_error (&error);
-                Log::Write(Log::Level::Error, message);
-                g_free (message);
-            }
+        if (error) {
+            Log::Write(Log::Level::Info, "pipeline not created");
+            gchar *message = g_strdup_printf("Unable to build pipeline: %s", error->message);
+            g_clear_error(&error);
+            Log::Write(Log::Level::Error, message);
+            g_free(message);
+        }
         Log::Write(Log::Level::Info, "Getting the appsink");
-            m_appSink = (GstAppSink *) (gst_bin_get_by_name((GstBin *) (m_pipeline), "appsink0"));
-            if (!m_appSink) {
-                Log::Write(Log::Level::Error, "couldn't find appsink");                
+        m_appSink = (GstAppSink *) (gst_bin_get_by_name((GstBin *) (m_pipeline), "appsink0"));
+        if (!m_appSink) {
+            Log::Write(Log::Level::Error, "couldn't find appsink");
+        }
+
+
+        Log::Write(Log::Level::Info, "Setting pipeline to playing");
+        /* Start playing */
+        auto ret = gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
+        if (ret == GST_STATE_CHANGE_FAILURE) {
+            Log::Write(Log::Level::Error, "Unable to set the pipeline to the playing state.");
+        }
+        Log::Write(Log::Level::Info, "First query");
+        /* Wait until error or EOS */
+        m_bus = gst_element_get_bus(m_pipeline);
+        m_msg = gst_bus_timed_pop_filtered(m_bus, 10000000,
+                                           (GstMessageType) (GST_MESSAGE_ERROR |
+                                                             GST_MESSAGE_EOS));
+        if (m_msg) {
+            /* See next tutorial for proper error message handling/parsing */
+            if (GST_MESSAGE_TYPE (m_msg) == GST_MESSAGE_ERROR) {
+                Log::Write(Log::Level::Warning, "An error occurred! ");
             }
-            
-            
+            GError *err;
+            gchar *debug_info;
 
-            Log::Write(Log::Level::Info, "Setting pipeline to playing");
-            /* Start playing */
-            gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
-            Log::Write(Log::Level::Info, "First query");
-            /* Wait until error or EOS */
-            m_bus = gst_element_get_bus(m_pipeline);
-            m_msg = gst_bus_timed_pop_filtered(m_bus, 10000000,
-                                               (GstMessageType) (GST_MESSAGE_ERROR |
-                                                                 GST_MESSAGE_EOS));
-            if (m_msg) {
-                /* See next tutorial for proper error message handling/parsing */
-                if (GST_MESSAGE_TYPE (m_msg) == GST_MESSAGE_ERROR) {
-                    g_error ("An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
-                             "variable set for more details.");
-                }
+            if(GST_MESSAGE_TYPE (m_msg) == GST_MESSAGE_ERROR) {
+                gst_message_parse_error(m_msg, &err, &debug_info);
+                Log::Write(Log::Level::Warning, std::string("Error received from element ") + std::string(GST_OBJECT_NAME(m_msg->src)) + std::string(err->message));
+                
+                Log::Write(Log::Level::Warning, std::string("Debugging information: ") + std::string(debug_info ? debug_info : "none"));
+                g_clear_error(&err);
+                g_free(debug_info);
             }
+            gst_message_unref(m_msg);
+        }
 
-            Log::Write(Log::Level::Warning, "All initialized!");
-
-            //m_videoCapture =
-            //    cv::VideoCapture("udpsrc port=5004 caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! appsink", cv::CAP_GSTREAMER);
-            //cv::VideoCapture(0);
-       
+        Log::Write(Log::Level::Warning, "All initialized!");
     }
 
     ~OpenXrProgram() override {
@@ -198,13 +205,22 @@ struct OpenXrProgram : IOpenXrProgram {
             xrDestroyInstance(m_instance);
         }
         /* Free resources */
-        gst_message_unref (m_msg);
-        gst_object_unref (m_bus);
+        if (m_msg) {
+            gst_message_unref(m_msg);
+        }
+        if (m_bus) {
+            gst_object_unref(m_bus);
+        }
+        
         g_main_context_pop_thread_default(m_dataContext);
         g_main_context_unref (m_dataContext);
-        gst_element_set_state (m_pipeline, GST_STATE_NULL);
-        gst_object_unref(m_appSink);
-        gst_object_unref (m_pipeline);
+        if (m_pipeline) {
+            gst_element_set_state(m_pipeline, GST_STATE_NULL);
+            if (m_appSink) {
+                gst_object_unref(m_appSink);
+            }
+            gst_object_unref(m_pipeline);
+        }
     }
 
     static void LogLayersAndExtensions() {
@@ -995,47 +1011,7 @@ struct OpenXrProgram : IOpenXrProgram {
         CHECK(viewCountOutput == m_configViews.size());
         CHECK(viewCountOutput == m_swapchains.size());
 
-        projectionLayerViews.resize(viewCountOutput);
-
-        // For each locatable space that we want to visualize, render a 25cm cube.
-        std::vector<Cube> cubes;
-
-        for (XrSpace visualizedSpace : m_visualizedSpaces) {
-            XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
-            res = xrLocateSpace(visualizedSpace, m_appSpace, predictedDisplayTime, &spaceLocation);
-            CHECK_XRRESULT(res, "xrLocateSpace");
-            if (XR_UNQUALIFIED_SUCCESS(res)) {
-                if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
-                    (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-                    cubes.push_back(Cube{spaceLocation.pose, {0.25f, 0.25f, 0.25f}});
-                }
-            } else {
-                Log::Write(Log::Level::Verbose, Fmt("Unable to locate a visualized reference space in app space: %d", res));
-            }
-        }
-
-        // Render a 10cm cube scaled by grabAction for each hand. Note renderHand will only be
-        // true when the application has focus.
-        for (auto hand : {Side::LEFT, Side::RIGHT}) {
-            XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
-            res = xrLocateSpace(m_input.handSpace[hand], m_appSpace, predictedDisplayTime, &spaceLocation);
-            CHECK_XRRESULT(res, "xrLocateSpace");
-            if (XR_UNQUALIFIED_SUCCESS(res)) {
-                if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
-                    (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-                    float scale = 0.1f * m_input.handScale[hand];
-                    cubes.push_back(Cube{spaceLocation.pose, {scale, scale, scale}});
-                }
-            } else {
-                // Tracking loss is expected when the hand is not active so only log a message
-                // if the hand is active.
-                if (m_input.handActive[hand] == XR_TRUE) {
-                    const char* handName[] = {"left", "right"};
-                    Log::Write(Log::Level::Verbose,
-                               Fmt("Unable to locate %s hand action space in app space: %d", handName[hand], res));
-                }
-            }
-        }
+        projectionLayerViews.resize(viewCountOutput);        
 
         // Render view to the appropriate part of the swapchain image.
         for (uint32_t i = 0; i < viewCountOutput; i++) {
@@ -1059,9 +1035,8 @@ struct OpenXrProgram : IOpenXrProgram {
             projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
 
             bool is_left = i == 0;
-
             
-            cv::Mat image;// = cv::Mat(cv::Size(1680,1760), CV_8UC4, cv::Scalar(255,255,0,255));
+            cv::Mat image;
             GstMapInfo info;
             GstBuffer* buffer;
             GstSample* sample;
@@ -1075,22 +1050,32 @@ struct OpenXrProgram : IOpenXrProgram {
                              "variable set for more details.");
                 }
                 
-                std::cout<<"showing red color as end or error has occurred"<<std::endl;
-
                 image = cv::Mat(cv::Size(1680,1760), CV_8UC4, cv::Scalar(255,255,0,100));
                 cv::putText(image, "Error or End Video", cv::Point(1680/2, 1760/2 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
+
+                gst_message_unref(m_msg);
             } else {
-                std::cout<<"Getting sample"<<std::endl;
+                Log::Write(Log::Level::Info, "Getting sample");
                 sample = gst_app_sink_pull_sample(m_appSink);
                 if (sample) {
-                    std::cout<<"getting buffer"<<std::endl;
+                    Log::Write(Log::Level::Info,"getting buffer");
+                    GstBufferList * bufferList = gst_sample_get_buffer_list(sample);
+                    if (bufferList) {
+                        auto totalSize = gst_buffer_list_calculate_size (bufferList);
+                        auto length = gst_buffer_list_length (bufferList);
+                        std::stringstream ss;
+                        ss << "Total size of the sample is: " << totalSize << ". Length of the list is: " << length <<".";
+                        Log::Write(Log::Level::Info, ss.str());
+                    }
                     buffer = gst_sample_get_buffer(sample);
                     if (buffer) {
-                        std::cout<<"mapping"<<std::endl;
-                        //gst_buffer_ref(buffer);
+                        Log::Write(Log::Level::Info,"mapping");
+
                         mapped = gst_buffer_map(buffer, &info, GST_MAP_READ);
                         if (mapped) {
-                            int type = CV_8UC4;
+                            const auto str_size = std::string("Size is") + std::to_string(info.size );
+                            Log::Write(Log::Level::Info, str_size);
+                            int type = CV_8UC1;
                             cv::ColorConversionCodes conversion_code;
                             if (info.size == 1680 * 1760) {
                                 type = CV_8UC1;
@@ -1108,38 +1093,24 @@ struct OpenXrProgram : IOpenXrProgram {
                             }
                         }
                     }                    
-                } else {
+                } 
+
+                if (!sample || !buffer || !mapped) {
                     image = cv::Mat(cv::Size(1680, 1760), CV_8UC4, cv::Scalar(0,0,200,50));
                 }               
             }
-            
-//            bool success = m_videoCapture.read(image);
-//            if (!success) {
-//                Log::Write(Log::Level::Error, "Failed to read frame from video capture. Seeking to begin and retrying...");
-//                m_videoCapture.set(cv::CAP_PROP_POS_FRAMES, 0);
-//                success = m_videoCapture.read(image);
-//                if (!success) {
-//                    Log::Write(Log::Level::Error, "Failed to read frame from video capture");
-//                    return false;
-//                }
-//            }
-//            cv::cvtColor(image, image, cv::COLOR_BGR2RGBA);
-//            cv::putText(image, is_left ? "Left" : "Right", cv::Point(1000, 1000 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
 
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
             m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, image);
 
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
-            
-            if (!m_msg) {
-                if (buffer && mapped) {
-                    gst_buffer_unmap(buffer, &info);
-                }                
-                if (sample) {
-                    gst_sample_unref(sample);
-                }
-                //image.release();
+
+            if (buffer && mapped) {
+                gst_buffer_unmap(buffer, &info);
+            }                
+            if (sample) {
+                gst_sample_unref(sample);
             }
         }
 
