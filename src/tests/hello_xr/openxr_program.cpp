@@ -1053,11 +1053,17 @@ for (int i =0; i < 2; ++i) {
             
             cv::Mat image;
             GstMapInfo info;
-            GstBuffer* buffer;
-            GstSample* sample;
+            GstBuffer* buffer = nullptr;
+            GstSample* sample = nullptr;
             auto mapped = false;
+            
+            auto start = std::chrono::high_resolution_clock::now();
 
-            m_msg[i] = gst_bus_timed_pop_filtered (m_bus[i], 10000000, (GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
+            m_msg[i] = gst_bus_timed_pop_filtered (m_bus[i], 1000, (GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
+
+            auto d = std::chrono::high_resolution_clock::now() - start;
+            Log::Write(Log::Level::Info, "Pop filter returned after " +  std::to_string(std::chrono::nanoseconds(d).count()));
+            start = std::chrono::high_resolution_clock::now();
             if (m_msg[i]) {
                 /* See next tutorial for proper error message handling/parsing */
                 if (GST_MESSAGE_TYPE (m_msg[i]) == GST_MESSAGE_ERROR) {
@@ -1072,9 +1078,15 @@ for (int i =0; i < 2; ++i) {
             } else {
                 Log::Write(Log::Level::Info, "Getting sample");
                 sample = gst_app_sink_pull_sample(m_appSink[i]);
+                d = std::chrono::high_resolution_clock::now() - start;
+                Log::Write(Log::Level::Info, "Getting a sample took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+                start = std::chrono::high_resolution_clock::now();
                 if (sample) {
                     Log::Write(Log::Level::Info,"getting buffer");
                     GstBufferList * bufferList = gst_sample_get_buffer_list(sample);
+                    d = std::chrono::high_resolution_clock::now() - start;
+                    Log::Write(Log::Level::Info, "Getting a buffer list took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+                    start = std::chrono::high_resolution_clock::now();
                     if (bufferList) {
                         auto totalSize = gst_buffer_list_calculate_size (bufferList);
                         auto length = gst_buffer_list_length (bufferList);
@@ -1083,10 +1095,16 @@ for (int i =0; i < 2; ++i) {
                         Log::Write(Log::Level::Info, ss.str());
                     }
                     buffer = gst_sample_get_buffer(sample);
+                    d = std::chrono::high_resolution_clock::now() - start;
+                    Log::Write(Log::Level::Info, "Getting a sbuffer sample took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+                    start = std::chrono::high_resolution_clock::now();
                     if (buffer) {
                         Log::Write(Log::Level::Info,"mapping");
 
                         mapped = gst_buffer_map(buffer, &info, GST_MAP_READ);
+                        d = std::chrono::high_resolution_clock::now() - start;
+                        Log::Write(Log::Level::Info, "Mapping buffer took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+                        start = std::chrono::high_resolution_clock::now();
                         if (mapped) {
                             const auto str_size = std::string("Size is") + std::to_string(info.size );
                             Log::Write(Log::Level::Info, str_size);
@@ -1114,7 +1132,9 @@ for (int i =0; i < 2; ++i) {
                     image = cv::Mat(cv::Size(kStreamWidth , kStreamHeight), CV_8UC4, cv::Scalar(0,0,200,50));
                 }               
             }
-            
+            d = std::chrono::high_resolution_clock::now() - start;
+            Log::Write(Log::Level::Info, "Creating the image took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+            start = std::chrono::high_resolution_clock::now();
             cv::Mat copy_image = cv::Mat(cv::Size(kDeviceWidth, kDeviceHeight), CV_8UC4, cv::Scalar(0, 0, 0, 255));
             constexpr int kRowStart = (kDeviceHeight - kStreamHeight) / 2;
             constexpr int kColStart = 0;
@@ -1122,20 +1142,27 @@ for (int i =0; i < 2; ++i) {
             constexpr int kStreamColStart = (kStreamWidth - kDeviceWidth) / 2;
 
             image(cv::Range(0, kStreamHeight), cv::Range(kStreamColStart, kStreamColStart + kDeviceWidth)).copyTo(copy_image(cv::Range(kRowStart, kRowStart + kStreamHeight), cv::Range(kColStart, kDeviceWidth)));
-            
 
+            d = std::chrono::high_resolution_clock::now() - start;
+            Log::Write(Log::Level::Info, "Copying image took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+            start = std::chrono::high_resolution_clock::now();
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
             m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, copy_image);
 
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
-
+            d = std::chrono::high_resolution_clock::now() - start;
+            Log::Write(Log::Level::Info, "Rendering took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+            start = std::chrono::high_resolution_clock::now();
             if (buffer && mapped) {
                 gst_buffer_unmap(buffer, &info);
             }                
             if (sample) {
                 gst_sample_unref(sample);
             }
+            d = std::chrono::high_resolution_clock::now() - start;
+            Log::Write(Log::Level::Info, "Memory deallocation took " +  std::to_string(std::chrono::nanoseconds(d).count()));
+            start = std::chrono::high_resolution_clock::now();
         }
 
         layer.space = m_appSpace;
