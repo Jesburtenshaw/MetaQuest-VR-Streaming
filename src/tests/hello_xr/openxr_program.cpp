@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <set>
+#include <string>
 
 #include <opencv2/opencv.hpp>
 #include <gst/gst.h>
@@ -105,6 +106,286 @@ inline XrReferenceSpaceCreateInfo GetXrReferenceSpaceCreateInfo(const std::strin
     return referenceSpaceCreateInfo;
 }
 
+    class TimeRecorder {
+
+    public:
+        explicit TimeRecorder (bool reinitialize = false) : start_{std::chrono::high_resolution_clock::now()}, reinitialize_{reinitialize} {
+
+        }
+        void LogElapsedTime(const std::string& message="") {
+            auto duration = std::chrono::high_resolution_clock::now() - start_;
+            Log::Write(Log::Level::Info, message +
+                                         std::to_string(std::chrono::nanoseconds(duration).count()));
+            if (reinitialize_) {
+                start_ = std::chrono::high_resolution_clock::now();
+            }
+        }
+    private:
+        std::chrono::high_resolution_clock::time_point start_;
+        bool reinitialize_;
+    };
+    
+    class Pipeline {
+        //delete copy constructor
+        Pipeline(const Pipeline&) = delete;
+        // delete copy assignment
+        Pipeline& operator=(const Pipeline&) = delete;
+    public:
+        static void InitializeGStreamer() {
+            if (!is_initialized) {
+                gst_init_static_plugins();
+                Log::Write(Log::Level::Verbose, "Initializing gstreamer");
+                gst_init(nullptr, nullptr);
+                is_initialized = true;
+            }
+        }
+        Pipeline(const std::string& pipeline) : pipeline_{pipeline} {
+            InitializeGStreamer();
+
+            if (i == 0) {
+                origin = "[Left]";
+            } else {
+                origin = "[Right]";
+            }
+            Log::Write(Log::Level::Info, origin+ "Created context");
+            m_dataContext = g_main_context_new();
+            g_main_context_push_thread_default(m_dataContext);
+            GError *error = nullptr;
+            m_pipeline = gst_parse_launch(pipeline_.c_str(), &error);
+            Log::Write(Log::Level::Info, origin+ "Checking the pipeline");
+            if (error) {
+                Log::Write(Log::Level::Info, origin+ "pipeline not created");
+                gchar *message = g_strdup_printf("Unable to build pipeline: %s", error->message);
+                g_clear_error(&error);
+                Log::Write(Log::Level::Error, message);
+                g_free(message);
+            }
+            Log::Write(Log::Level::Info, origin+ "Getting the appsink");
+            std::string appSinkStr = std::string("appsink") + std::to_string(i);
+            m_appSink = (GstAppSink * )(
+                    gst_bin_get_by_name((GstBin * )(m_pipeline), appSinkStr.c_str()));
+            if (!m_appSink) {
+                Log::Write(Log::Level::Error, origin+ "couldn't find appsink");
+            }
+            
+            // appsink name is increased for each pipeline
+            i++;
+
+            Log::Write(Log::Level::Info, origin+ "Setting pipeline to playing");
+            /* Start playing */
+            auto ret = gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
+            if (ret == GST_STATE_CHANGE_FAILURE) {
+                Log::Write(Log::Level::Error, origin+ "Unable to set the pipeline to the playing state.");
+            } else {
+                Log::Write(Log::Level::Info, origin+ "Pipeline is playing");
+
+                Log::Write(Log::Level::Info, origin+ "First query");
+                /* Wait until error or EOS */
+                m_bus = gst_element_get_bus(m_pipeline);
+                m_msg = gst_bus_timed_pop_filtered(m_bus, 10000000,
+                                                   (GstMessageType) (GST_MESSAGE_ERROR |
+                                                                     GST_MESSAGE_EOS));
+                if (m_msg) {
+                    if (GST_MESSAGE_TYPE(m_msg) == GST_MESSAGE_ERROR) {
+                        Log::Write(Log::Level::Warning, origin+ "An error occurred! ");
+                    }
+                    GError *err;
+                    gchar *debug_info;
+
+                    if (GST_MESSAGE_TYPE(m_msg) == GST_MESSAGE_ERROR) {
+                        gst_message_parse_error(m_msg, &err, &debug_info);
+                        Log::Write(Log::Level::Warning,
+                                   std::string(origin+ "Error received from element ") +
+                                   std::string(GST_OBJECT_NAME(m_msg->src)) +
+                                   std::string(err->message));
+
+                        Log::Write(Log::Level::Warning, std::string(origin+ "Debugging information: ") +
+                                                        std::string(
+                                                                debug_info ? debug_info : "none"));
+                        g_clear_error(&err);
+                        g_free(debug_info);
+                    }
+                    gst_message_unref(m_msg);
+                }
+                m_thread = std::make_unique<std::thread>(&Pipeline::SampleReader, this);
+            }
+        }
+        ~Pipeline() {
+            m_exit = true;
+            if (m_thread) {
+                m_thread->join();
+            }
+
+            /* Free resources */
+            
+            if (m_msg) {
+                gst_message_unref(m_msg);
+            }
+            if (m_bus) {
+                gst_object_unref(m_bus);
+            }
+
+            g_main_context_pop_thread_default(m_dataContext);
+            g_main_context_unref(m_dataContext);
+            if (m_pipeline) {
+                gst_element_set_state(m_pipeline, GST_STATE_NULL);
+                if (m_appSink) {
+                    gst_object_unref(m_appSink);
+                }
+                gst_object_unref(m_pipeline);
+            }
+            
+//            if (is_initialized) {
+//                Log::Write(Log::Level::Verbose, "Deinitializing gstreamer");
+//                gst_deinit();
+//                is_initialized = false;
+//            }            
+        }
+        
+        struct SampleRead {
+            // delete copy constructor
+            SampleRead(const SampleRead&) = delete;
+            // delete copy assignment
+            SampleRead& operator=(const SampleRead&) = delete;
+            SampleRead() {
+                image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4, cv::Scalar(0, 0, 200, 50));
+            }
+            ~SampleRead() {
+                if (buffer && mapped) {
+                    gst_buffer_unmap(buffer, &info);
+                }
+                if (sample) {
+                    gst_sample_unref(sample);
+                }
+            }
+            cv::Mat image;
+            GstMapInfo info;
+            GstBuffer *buffer = nullptr;
+            GstSample *sample = nullptr;
+            bool mapped = false;
+        };
+        
+        void SampleReader() {
+            while (!m_exit) {
+                TimeRecorder timeRecorder = TimeRecorder(true);
+
+                m_msg = gst_bus_pop_filtered(m_bus, 
+                                                      (GstMessageType) (GST_MESSAGE_ERROR |
+                                                                        GST_MESSAGE_EOS));
+
+                timeRecorder.LogElapsedTime( origin + "Pop filter returned after ");
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if (m_samples.size() > kMaxSamples) {
+                        m_samples.pop_front();
+                    }
+                }
+                m_samples.emplace_back();
+
+                SampleRead& sampleRead = m_samples.back();
+                if (m_msg) {
+                    /* See next tutorial for proper error message handling/parsing */
+                    if (GST_MESSAGE_TYPE (m_msg) == GST_MESSAGE_ERROR) {
+                        Log::Write(Log::Level::Error,
+                                   origin+ "An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
+                                   "variable set for more details.");
+                    }
+
+                    sampleRead.image = cv::Mat(cv::Size(1680, 1760), CV_8UC4, cv::Scalar(255, 255, 0, 100));
+                    cv::putText(sampleRead.image, "Error or End Video", cv::Point(1680 / 2, 1760 / 2),
+                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4,
+                                cv::LINE_AA);
+
+                    gst_message_unref(m_msg);
+                } else {
+                    Log::Write(Log::Level::Info, origin+ "Getting sample");
+                    sampleRead.sample = gst_app_sink_pull_sample(m_appSink);
+                    timeRecorder.LogElapsedTime(origin+ "Getting a sample took ");
+                    if (sampleRead.sample) {
+                        Log::Write(Log::Level::Info, "getting buffer");
+                        GstBufferList *bufferList = gst_sample_get_buffer_list(sampleRead.sample);
+                        timeRecorder.LogElapsedTime(origin+ "Getting a buffer list took ");
+                        if (bufferList) {
+                            auto totalSize = gst_buffer_list_calculate_size(bufferList);
+                            auto length = gst_buffer_list_length(bufferList);
+                            std::stringstream ss;
+                            ss << "Total size of the sample is: " << totalSize
+                               << ". Length of the list is: " << length << ".";
+                            Log::Write(Log::Level::Info, ss.str());
+                        }
+                        sampleRead.buffer = gst_sample_get_buffer(sampleRead.sample);
+                        timeRecorder.LogElapsedTime(origin+ "Getting a buffer sample took ");
+                        if (sampleRead.buffer) {
+                            Log::Write(Log::Level::Info, origin+ "mapping");
+
+                            sampleRead.mapped = gst_buffer_map(sampleRead.buffer, &sampleRead.info, GST_MAP_READ);
+                            timeRecorder.LogElapsedTime(origin+ "Mapping buffer took ");
+                            if (sampleRead.mapped) {
+                                const auto str_size =
+                                        std::string("Size is") + std::to_string(sampleRead.info.size);
+                                Log::Write(Log::Level::Info, str_size);
+                                int type = CV_8UC1;
+                                cv::ColorConversionCodes conversion_code = cv::COLOR_GRAY2RGBA;
+                                if (sampleRead.info.size == kStreamWidth * kStreamHeight) {
+                                    type = CV_8UC1;
+                                    conversion_code = cv::COLOR_GRAY2RGBA;
+                                } else if (sampleRead.info.size == kStreamWidth * kStreamHeight * 3) {
+                                    type = CV_8UC3;
+                                    conversion_code = cv::COLOR_RGB2RGBA;
+                                } else if (sampleRead.info.size == kStreamWidth * kStreamHeight * 4) {
+                                    type = CV_8UC4;
+                                }
+                                sampleRead.image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), type,
+                                                           sampleRead.info.data);
+
+                                if (type != CV_8UC4) {
+                                    cv::cvtColor(sampleRead.image, sampleRead.image, conversion_code);
+                                }
+                            }
+                        }
+                    }
+
+                    if (!sampleRead.sample || !sampleRead.buffer || !sampleRead.mapped) {
+                        sampleRead.image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4,
+                                        cv::Scalar(0, 0, 200, 50));
+                    }
+                }
+                
+            }
+        }
+        cv::Mat& GetImage() {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_samples.empty()) {
+                m_samples.emplace_back();
+                SampleRead& sample = m_samples.back();
+                sample.image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4,
+                               cv::Scalar(0, 0, 200, 50));                
+            }
+            while(m_samples.size() > 2) {
+                m_samples.pop_front();                
+            }
+            auto& image = m_samples.front().image;
+            return image;
+        }
+    private:
+        std::deque<SampleRead> m_samples;
+        static bool is_initialized;
+        static int i;
+        std::string pipeline_;
+        GstElement* m_pipeline;
+        GstBus* m_bus;
+        GstMessage* m_msg;
+        GstAppSink* m_appSink;
+        GMainContext* m_dataContext;
+        std::atomic<bool> m_exit{false};
+        std::unique_ptr<std::thread> m_thread;
+        std::mutex m_mutex;
+        static const int kMaxSamples = 10;
+        
+        std::string origin;
+    };
+    int Pipeline::i = 0;
+    bool Pipeline::is_initialized = false;
 struct OpenXrProgram : IOpenXrProgram {
     OpenXrProgram(const std::shared_ptr<Options>& options, const std::shared_ptr<IPlatformPlugin>& platformPlugin,
                   const std::shared_ptr<IGraphicsPlugin>& graphicsPlugin)
@@ -113,79 +394,16 @@ struct OpenXrProgram : IOpenXrProgram {
           m_graphicsPlugin(graphicsPlugin),
           m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE, XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                  XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
-        char *version_utf8 = gst_version_string();
+       
 
-
-        Log::Write(Log::Level::Verbose, "Initializing gstreamer");
-
-        /* Initialize GStreamer */
-        //
-
-        gst_init_static_plugins();
-
-        gst_init(nullptr, nullptr);
-
-        Log::Write(Log::Level::Info, "Creating the pipeline");
+        Log::Write(Log::Level::Info, "Creating the pipelines");
         /* Build the pipeline */
         int port = 5004;
-for (int i =0; i < 2; ++i) {
-    m_dataContext[i] = g_main_context_new();
-    g_main_context_push_thread_default(m_dataContext[i]);
-    Log::Write(Log::Level::Info, "Created context");
-    GError *error = nullptr;
-    std::stringstream ss;
-    ss << "udpsrc port=" << port + i<< " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! video/x-raw,format=RGBA ! appsink";
-    m_pipeline[i] = gst_parse_launch(ss.str().c_str(), &error);
-    Log::Write(Log::Level::Info, "Checking the pipeline");
-    if (error) {
-        Log::Write(Log::Level::Info, "pipeline not created");
-        gchar *message = g_strdup_printf("Unable to build pipeline: %s", error->message);
-        g_clear_error(&error);
-        Log::Write(Log::Level::Error, message);
-        g_free(message);
-    }
-    Log::Write(Log::Level::Info, "Getting the appsink");
-    std::string appSinkStr = std::string("appsink") + std::to_string(i);
-    m_appSink[i] = (GstAppSink *) (gst_bin_get_by_name((GstBin *) (m_pipeline[i]), appSinkStr.c_str()));
-    if (!m_appSink[i]) {
-        Log::Write(Log::Level::Error, "couldn't find appsink");
-    }
-
-
-    Log::Write(Log::Level::Info, "Setting pipeline to playing");
-    /* Start playing */
-    auto ret = gst_element_set_state(m_pipeline[i], GST_STATE_PLAYING);
-    if (ret == GST_STATE_CHANGE_FAILURE) {
-        Log::Write(Log::Level::Error, "Unable to set the pipeline to the playing state.");
-    }
-    Log::Write(Log::Level::Info, "First query");
-    /* Wait until error or EOS */
-    m_bus[i] = gst_element_get_bus(m_pipeline[i]);
-    m_msg[i] = gst_bus_timed_pop_filtered(m_bus[i], 10000000,
-                                       (GstMessageType) (GST_MESSAGE_ERROR |
-                                                         GST_MESSAGE_EOS));
-    if (m_msg[i]) {
-        /* See next tutorial for proper error message handling/parsing */
-        if (GST_MESSAGE_TYPE (m_msg[i]) == GST_MESSAGE_ERROR) {
-            Log::Write(Log::Level::Warning, "An error occurred! ");
+        for (int i =0; i < 2; ++i) {
+            std::stringstream ss;
+            ss << "udpsrc port=" << port + i<< " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! video/x-raw,format=RGBA ! appsink";
+            m_pipelines[i] = std::make_unique<Pipeline>(ss.str());
         }
-        GError *err;
-        gchar *debug_info;
-
-        if (GST_MESSAGE_TYPE (m_msg[i]) == GST_MESSAGE_ERROR) {
-            gst_message_parse_error(m_msg[i], &err, &debug_info);
-            Log::Write(Log::Level::Warning, std::string("Error received from element ") +
-                                            std::string(GST_OBJECT_NAME(m_msg[i]->src)) +
-                                            std::string(err->message));
-
-            Log::Write(Log::Level::Warning, std::string("Debugging information: ") +
-                                            std::string(debug_info ? debug_info : "none"));
-            g_clear_error(&err);
-            g_free(debug_info);
-        }
-        gst_message_unref(m_msg[i]);
-    }
-}
 
         Log::Write(Log::Level::Warning, "All initialized!");
     }
@@ -216,26 +434,7 @@ for (int i =0; i < 2; ++i) {
 
         if (m_instance != XR_NULL_HANDLE) {
             xrDestroyInstance(m_instance);
-        }
-        /* Free resources */
-        for (int i =0; i <2; ++i) {
-            if (m_msg[i]) {
-                gst_message_unref(m_msg[i]);
-            }
-            if (m_bus[i]) {
-                gst_object_unref(m_bus[i]);
-            }
-
-            g_main_context_pop_thread_default(m_dataContext[i]);
-            g_main_context_unref(m_dataContext[i]);
-            if (m_pipeline[i]) {
-                gst_element_set_state(m_pipeline[i], GST_STATE_NULL);
-                if (m_appSink[i]) {
-                    gst_object_unref(m_appSink[i]);
-                }
-                gst_object_unref(m_pipeline[i]);
-            }
-        }
+        }        
     }
 
     static void LogLayersAndExtensions() {
@@ -1002,6 +1201,8 @@ for (int i =0; i < 2; ++i) {
         CHECK_XRCMD(xrEndFrame(m_session, &frameEndInfo));
     }
 
+    
+
     bool RenderLayer(XrTime predictedDisplayTime, std::vector<XrCompositionLayerProjectionView>& projectionLayerViews,
                      XrCompositionLayerProjection& layer) {
         XrResult res;
@@ -1048,93 +1249,8 @@ for (int i =0; i < 2; ++i) {
             projectionLayerViews[i].subImage.swapchain = viewSwapchain.handle;
             projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
             projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
-
-            bool is_left = i == 0;
             
-            cv::Mat image;
-            GstMapInfo info;
-            GstBuffer* buffer = nullptr;
-            GstSample* sample = nullptr;
-            auto mapped = false;
-            
-            auto start = std::chrono::high_resolution_clock::now();
-
-            m_msg[i] = gst_bus_timed_pop_filtered (m_bus[i], 1000, (GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
-
-            auto d = std::chrono::high_resolution_clock::now() - start;
-            Log::Write(Log::Level::Info, "Pop filter returned after " +  std::to_string(std::chrono::nanoseconds(d).count()));
-            start = std::chrono::high_resolution_clock::now();
-            if (m_msg[i]) {
-                /* See next tutorial for proper error message handling/parsing */
-                if (GST_MESSAGE_TYPE (m_msg[i]) == GST_MESSAGE_ERROR) {
-                    Log::Write(Log::Level::Error, "An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
-                             "variable set for more details.");
-                }
-                
-                image = cv::Mat(cv::Size(1680,1760), CV_8UC4, cv::Scalar(255,255,0,100));
-                cv::putText(image, "Error or End Video", cv::Point(1680/2, 1760/2 ), cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4, cv::LINE_AA);
-
-                gst_message_unref(m_msg[i]);
-            } else {
-                Log::Write(Log::Level::Info, "Getting sample");
-                sample = gst_app_sink_pull_sample(m_appSink[i]);
-                d = std::chrono::high_resolution_clock::now() - start;
-                Log::Write(Log::Level::Info, "Getting a sample took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-                start = std::chrono::high_resolution_clock::now();
-                if (sample) {
-                    Log::Write(Log::Level::Info,"getting buffer");
-                    GstBufferList * bufferList = gst_sample_get_buffer_list(sample);
-                    d = std::chrono::high_resolution_clock::now() - start;
-                    Log::Write(Log::Level::Info, "Getting a buffer list took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-                    start = std::chrono::high_resolution_clock::now();
-                    if (bufferList) {
-                        auto totalSize = gst_buffer_list_calculate_size (bufferList);
-                        auto length = gst_buffer_list_length (bufferList);
-                        std::stringstream ss;
-                        ss << "Total size of the sample is: " << totalSize << ". Length of the list is: " << length <<".";
-                        Log::Write(Log::Level::Info, ss.str());
-                    }
-                    buffer = gst_sample_get_buffer(sample);
-                    d = std::chrono::high_resolution_clock::now() - start;
-                    Log::Write(Log::Level::Info, "Getting a sbuffer sample took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-                    start = std::chrono::high_resolution_clock::now();
-                    if (buffer) {
-                        Log::Write(Log::Level::Info,"mapping");
-
-                        mapped = gst_buffer_map(buffer, &info, GST_MAP_READ);
-                        d = std::chrono::high_resolution_clock::now() - start;
-                        Log::Write(Log::Level::Info, "Mapping buffer took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-                        start = std::chrono::high_resolution_clock::now();
-                        if (mapped) {
-                            const auto str_size = std::string("Size is") + std::to_string(info.size );
-                            Log::Write(Log::Level::Info, str_size);
-                            int type = CV_8UC1;
-                            cv::ColorConversionCodes conversion_code = cv::COLOR_GRAY2RGBA;
-                            if (info.size == kStreamWidth * kStreamHeight) {
-                                type = CV_8UC1;
-                                conversion_code = cv::COLOR_GRAY2RGBA;
-                            } else if (info.size == kStreamWidth * kStreamHeight * 3) {
-                                type = CV_8UC3;
-                                conversion_code = cv::COLOR_RGB2RGBA;
-                            } else if (info.size == kStreamWidth * kStreamHeight * 4) {
-                                type = CV_8UC4;
-                            }
-                            image = cv::Mat(cv::Size(kStreamWidth , kStreamHeight), type, info.data);
-
-                            if (type != CV_8UC4) {
-                                cv::cvtColor(image, image, conversion_code);
-                            }
-                        }
-                    }                    
-                } 
-
-                if (!sample || !buffer || !mapped) {
-                    image = cv::Mat(cv::Size(kStreamWidth , kStreamHeight), CV_8UC4, cv::Scalar(0,0,200,50));
-                }               
-            }
-            d = std::chrono::high_resolution_clock::now() - start;
-            Log::Write(Log::Level::Info, "Creating the image took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-            start = std::chrono::high_resolution_clock::now();
+            cv::Mat& image = m_pipelines[i]->GetImage();
             cv::Mat copy_image = cv::Mat(cv::Size(kDeviceWidth, kDeviceHeight), CV_8UC4, cv::Scalar(0, 0, 0, 255));
             constexpr int kRowStart = (kDeviceHeight - kStreamHeight) / 2;
             constexpr int kColStart = 0;
@@ -1143,26 +1259,17 @@ for (int i =0; i < 2; ++i) {
 
             image(cv::Range(0, kStreamHeight), cv::Range(kStreamColStart, kStreamColStart + kDeviceWidth)).copyTo(copy_image(cv::Range(kRowStart, kRowStart + kStreamHeight), cv::Range(kColStart, kDeviceWidth)));
 
-            d = std::chrono::high_resolution_clock::now() - start;
-            Log::Write(Log::Level::Info, "Copying image took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-            start = std::chrono::high_resolution_clock::now();
+            //timeRecorder.LogElapsedTime( "Copying image took " );
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
             m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, copy_image);
 
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
-            d = std::chrono::high_resolution_clock::now() - start;
-            Log::Write(Log::Level::Info, "Rendering took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-            start = std::chrono::high_resolution_clock::now();
-            if (buffer && mapped) {
-                gst_buffer_unmap(buffer, &info);
-            }                
-            if (sample) {
-                gst_sample_unref(sample);
-            }
-            d = std::chrono::high_resolution_clock::now() - start;
-            Log::Write(Log::Level::Info, "Memory deallocation took " +  std::to_string(std::chrono::nanoseconds(d).count()));
-            start = std::chrono::high_resolution_clock::now();
+            //timeRecorder.LogElapsedTime( "Rendering took " );
+            
+            //FreeBuffers(sample, buffer, &info, mapped);
+
+            //timeRecorder.LogElapsedTime( "Memory deallocation took " );
         }
 
         layer.space = m_appSpace;
@@ -1200,13 +1307,7 @@ for (int i =0; i < 2; ++i) {
     InputState m_input;
 
     const std::set<XrEnvironmentBlendMode> m_acceptableBlendModes;
-
-    //cv::VideoCapture m_videoCapture;
-    GstElement* m_pipeline[2];
-    GstBus* m_bus[2];
-    GstMessage* m_msg[2];
-    GstAppSink* m_appSink[2];
-    GMainContext* m_dataContext[2];
+    std::unique_ptr<Pipeline> m_pipelines[2];
 };
 }  // namespace
 
