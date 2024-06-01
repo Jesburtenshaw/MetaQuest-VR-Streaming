@@ -38,12 +38,7 @@ const int COUNT = 2;
 }  // namespace Side
 
 constexpr int kStreamWidth = 1920;
-constexpr int kStreamHeight = 1080;
-
-// Specific to Meta Quest3.
-constexpr int kDeviceWidth = 1680;
-constexpr int kDeviceHeight = 1760;
-    
+constexpr int kStreamHeight = 1080;    
 
 inline std::string GetXrVersionString(XrVersion ver) {
     return Fmt("%d.%d.%d", XR_VERSION_MAJOR(ver), XR_VERSION_MINOR(ver), XR_VERSION_PATCH(ver));
@@ -234,12 +229,6 @@ inline XrReferenceSpaceCreateInfo GetXrReferenceSpaceCreateInfo(const std::strin
                 }
                 gst_object_unref(m_pipeline);
             }
-            
-//            if (is_initialized) {
-//                Log::Write(Log::Level::Verbose, "Deinitializing gstreamer");
-//                gst_deinit();
-//                is_initialized = false;
-//            }            
         }
         
         struct SampleRead {
@@ -251,7 +240,7 @@ inline XrReferenceSpaceCreateInfo GetXrReferenceSpaceCreateInfo(const std::strin
                 image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4, cv::Scalar(0, 0, 200, 50));
             }
             ~SampleRead() {
-                if (buffer && mapped) {
+                if (buffer && mapped) {                    
                     gst_buffer_unmap(buffer, &info);
                 }
                 if (sample) {
@@ -259,10 +248,12 @@ inline XrReferenceSpaceCreateInfo GetXrReferenceSpaceCreateInfo(const std::strin
                 }
             }
             cv::Mat image;
+            //VkBuffer vk_buffer;
             GstMapInfo info;
             GstBuffer *buffer = nullptr;
             GstSample *sample = nullptr;
             bool mapped = false;
+            bool has_vk_buffer = false;
         };
         
         void SampleReader() {
@@ -279,8 +270,9 @@ inline XrReferenceSpaceCreateInfo GetXrReferenceSpaceCreateInfo(const std::strin
                     if (m_samples.size() > kMaxSamples) {
                         m_samples.pop_front();
                     }
+                    m_samples.emplace_back();
                 }
-                m_samples.emplace_back();
+                timeRecorder.LogElapsedTime( origin + "Locking took ");            
 
                 SampleRead& sampleRead = m_samples.back();
                 if (m_msg) {
@@ -324,6 +316,7 @@ inline XrReferenceSpaceCreateInfo GetXrReferenceSpaceCreateInfo(const std::strin
                                 const auto str_size =
                                         std::string("Size is") + std::to_string(sampleRead.info.size);
                                 Log::Write(Log::Level::Info, str_size);
+                                
                                 int type = CV_8UC1;
                                 cv::ColorConversionCodes conversion_code = cv::COLOR_GRAY2RGBA;
                                 if (sampleRead.info.size == kStreamWidth * kStreamHeight) {
@@ -354,19 +347,22 @@ inline XrReferenceSpaceCreateInfo GetXrReferenceSpaceCreateInfo(const std::strin
             }
         }
         cv::Mat& GetImage() {
+            TimeRecorder timeRecorder = TimeRecorder(true);
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_samples.empty()) {
-                m_samples.emplace_back();
-                SampleRead& sample = m_samples.back();
+            timeRecorder.LogElapsedTime( origin + "Locking in getImage took ");
+            if (m_samples.size() <= 1) {
+                m_samples.emplace_front();
+                SampleRead& sample = m_samples.front();
                 sample.image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4,
-                               cv::Scalar(0, 0, 200, 50));                
+                                       cv::Scalar(0, 0, 200, 50));
             }
             while(m_samples.size() > 2) {
-                m_samples.pop_front();                
+                m_samples.pop_front();
             }
             auto& image = m_samples.front().image;
             return image;
         }
+        
     private:
         std::deque<SampleRead> m_samples;
         static bool is_initialized;
@@ -401,7 +397,7 @@ struct OpenXrProgram : IOpenXrProgram {
         int port = 5004;
         for (int i =0; i < 2; ++i) {
             std::stringstream ss;
-            ss << "udpsrc port=" << port + i<< " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin ! videoconvert ! video/x-raw,format=RGBA ! appsink";
+            ss << "udpsrc port=" << port + i<< " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert ! video/x-raw,format=RGBA ! appsink";
             m_pipelines[i] = std::make_unique<Pipeline>(ss.str());
         }
 
@@ -1201,8 +1197,6 @@ struct OpenXrProgram : IOpenXrProgram {
         CHECK_XRCMD(xrEndFrame(m_session, &frameEndInfo));
     }
 
-    
-
     bool RenderLayer(XrTime predictedDisplayTime, std::vector<XrCompositionLayerProjectionView>& projectionLayerViews,
                      XrCompositionLayerProjection& layer) {
         XrResult res;
@@ -1251,25 +1245,23 @@ struct OpenXrProgram : IOpenXrProgram {
             projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
             
             cv::Mat& image = m_pipelines[i]->GetImage();
-            cv::Mat copy_image = cv::Mat(cv::Size(kDeviceWidth, kDeviceHeight), CV_8UC4, cv::Scalar(0, 0, 0, 255));
-            constexpr int kRowStart = (kDeviceHeight - kStreamHeight) / 2;
-            constexpr int kColStart = 0;
+//            cv::Mat copy_image = cv::Mat(cv::Size(kDeviceWidth, kDeviceHeight), CV_8UC4, cv::Scalar(0, 0, 0, 255));
+//            constexpr int kRowStart = (kDeviceHeight - kStreamHeight) / 2;
+//            constexpr int kColStart = 0;
+//            
+//            constexpr int kStreamColStart = (kStreamWidth - kDeviceWidth) / 2;
+//            
+            TimeRecorder timeRecorder(true);
+//            image(cv::Range(0, kStreamHeight), cv::Range(kStreamColStart, kStreamColStart + kDeviceWidth)).copyTo(copy_image(cv::Range(kRowStart, kRowStart + kStreamHeight), cv::Range(kColStart, kDeviceWidth)));
+
             
-            constexpr int kStreamColStart = (kStreamWidth - kDeviceWidth) / 2;
-
-            image(cv::Range(0, kStreamHeight), cv::Range(kStreamColStart, kStreamColStart + kDeviceWidth)).copyTo(copy_image(cv::Range(kRowStart, kRowStart + kStreamHeight), cv::Range(kColStart, kDeviceWidth)));
-
-            //timeRecorder.LogElapsedTime( "Copying image took " );
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
-            m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, copy_image);
+            m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, image);
 
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
-            //timeRecorder.LogElapsedTime( "Rendering took " );
-            
-            //FreeBuffers(sample, buffer, &info, mapped);
+            timeRecorder.LogElapsedTime( "Rendering took " );           
 
-            //timeRecorder.LogElapsedTime( "Memory deallocation took " );
         }
 
         layer.space = m_appSpace;

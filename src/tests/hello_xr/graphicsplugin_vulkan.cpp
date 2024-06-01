@@ -33,6 +33,11 @@
 #endif
 
 namespace {
+
+// Specific to Meta Quest3.
+constexpr int kDeviceWidth = 1680;
+constexpr int kDeviceHeight = 1760;
+    
 VkCommandBuffer beginSingleTimeCommands(VkCommandPool commandPool, VkDevice device) {
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -108,18 +113,32 @@ void transitionImageLayout(VkImage image, VkImageLayout oldLayout, VkImageLayout
 
 void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height, VkCommandPool commandPool, VkDevice device,
                        VkQueue graphicsQueue) {
+    // Centering the image in the texture.
+    const int rowStart = (kDeviceHeight - static_cast<int>(height)) / 2;
+    const int colStart = (kDeviceWidth - static_cast<int>(width)) / 2;
+
+    Log::Write(Log::Level::Warning, "Row start: " + std::to_string(rowStart) + ", Col start: " + std::to_string(colStart));
+    
+    int byte_offset = 0;
+    if (rowStart < 0) {
+        byte_offset = -rowStart * width * 4;
+    }
+    if (colStart < 0) {
+        byte_offset += -colStart * 4;
+    }    
+    
     VkCommandBuffer commandBuffer = beginSingleTimeCommands(commandPool, device);
 
     VkBufferImageCopy region{};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
+    region.bufferOffset = 0;//byte_offset;
+    region.bufferRowLength = 0; //std::min(width, static_cast<uint32_t>(kDeviceWidth));
+    region.bufferImageHeight = 0;//std::min(height, static_cast<uint32_t>(kDeviceHeight));
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = 0;
     region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
-    region.imageOffset = {0, 0, 0};
-    region.imageExtent = {width, height, 1};
+    region.imageOffset = { 0,0,/*std::max(0, colStart), std::max(0, rowStart),*/0};
+    region.imageExtent = {width,height,/*std::min(width, static_cast<uint32_t>(kDeviceWidth)), std::min(height, static_cast<uint32_t>(kDeviceHeight)), */1};
 
     vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
@@ -201,7 +220,7 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
 
     vkBindBufferMemory(device, buffer, bufferMemory, 0);
 }
-
+    
 /* VkImage*/ void createTextureImage(VkDevice device, VkPhysicalDevice physicalDevice, VkCommandPool commandPool,
                                      VkImage textureImage, VkQueue graphicsQueue, const cv::Mat& image) {
     int texWidth, texHeight, texChannels;
