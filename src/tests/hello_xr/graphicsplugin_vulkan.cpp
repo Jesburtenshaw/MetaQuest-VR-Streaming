@@ -116,8 +116,6 @@ void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t 
     // Centering the image in the texture.
     const int rowStart = (kDeviceHeight - static_cast<int>(height)) / 2;
     const int colStart = (kDeviceWidth - static_cast<int>(width)) / 2;
-
-    Log::Write(Log::Level::Warning, "Row start: " + std::to_string(rowStart) + ", Col start: " + std::to_string(colStart));
     
     int byte_offset = 0;
     if (rowStart < 0) {
