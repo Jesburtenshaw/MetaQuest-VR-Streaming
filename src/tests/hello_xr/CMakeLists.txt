@@ -15,8 +15,13 @@
 # limitations under the License.
 #
 # Hint the path to the OpenCVConfig.cmake file
-set(OpenCV_DIR "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
-set(GSTREAMER_ROOT_ANDROID "D:/Downloads/gstreamer-1.0-android-universal-1.24.3.tar/gstreamer-1.0-android-universal-1.24.3")
+if(ANDROID)
+    set(OpenCV_DIR "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
+    set(GSTREAMER_ROOT_ANDROID "D:/Downloads/gstreamer-1.0-android-universal-1.24.3.tar/gstreamer-1.0-android-universal-1.24.3")
+else () # case of Windows
+    set(OpenCV_DIR "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
+    set(GSTREAMER_ROOT_ANDROID "D:/Downloads/gstreamer-1.0-android-universal-1.24.3.tar/gstreamer-1.0-android-universal-1.24.3")
+endif ()
 
 find_package(OpenCV REQUIRED java)
 
