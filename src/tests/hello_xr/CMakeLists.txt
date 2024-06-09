@@ -51,6 +51,7 @@ set(LOCAL_SOURCE
     platformplugin_win32.cpp
 )
 set(VULKAN_SHADERS vulkan_shaders/frag.glsl vulkan_shaders/vert.glsl)
+#set(VULKAN_SHADERS vulkan_shaders/shader.frag vulkan_shaders/shader.vert)
 
 if(ANDROID)
     if (${ANDROID_ABI} STREQUAL "armeabi")
