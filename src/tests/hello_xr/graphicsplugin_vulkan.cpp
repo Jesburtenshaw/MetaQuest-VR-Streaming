@@ -1569,7 +1569,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                           {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, Position)},
                            {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, TexCoord)}});
         
-        m_scale = {1.920, 1.080, 1.0};
+        m_scale = {1.920 * 2, 1.080 * 2, 1.0};
         m_pose = Translation({0.f, 0.f, m_disdance});
         
         m_drawBuffer.Create(s_indices.size(), s_vertexCoordData.size());
@@ -1719,9 +1719,9 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         }
    protected:
 
-        XrPosef m_pose = Translation({0.f, 0.f, -2.0f});
+        XrPosef m_pose = Translation({0.f, 0.f, -0.2f});
         XrVector3f m_scale{1.f, 1.f, 1.f};
-        float m_disdance = -2.0f;
+        float m_disdance = -0.2f;
         
     XrGraphicsBindingVulkan2KHR m_graphicsBinding{XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR};
     std::list<SwapchainImageContext> m_swapchainImageContexts;

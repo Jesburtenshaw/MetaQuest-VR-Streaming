@@ -1598,7 +1598,13 @@ namespace {
                     }
                 }
             }
-            
+#define QUEST_TELEOP_SIDE_BY_SIDE
+#ifdef QUEST_TELEOP_SIDE_BY_SIDE
+            cv::Mat &images = m_pipelines[0]->GetImage();
+            std::vector<cv::Mat> sides = std::vector<cv::Mat>(2);
+            sides[0] = images(cv::Rect(0, 0, images.cols / 2, images.rows));
+            sides[1] = images(cv::Rect(images.cols / 2, 0, images.cols / 2, images.rows));
+#endif
             // Render view to the appropriate part of the swapchain image.
             for (uint32_t i = 0; i < viewCountOutput; i++) {
                 // Each view has a separate swapchain which is acquired, rendered to, and released.
@@ -1621,9 +1627,11 @@ namespace {
                 projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
                 projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width,
                                                                      viewSwapchain.height};
-
+#ifndef QUEST_TELEOP_SIDE_BY_SIDE
                 cv::Mat &image = m_pipelines[i]->GetImage();
-
+#else
+                cv::Mat &image = sides[i];
+#endif
                 TimeRecorder timeRecorder(true);
 
                 const XrSwapchainImageBaseHeader *const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
