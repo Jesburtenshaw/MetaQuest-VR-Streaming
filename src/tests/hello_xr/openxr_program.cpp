@@ -15,14 +15,13 @@
 #include <cmath>
 #include <set>
 #include <string>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include "pipeline.h"
 
-#include <opencv2/opencv.hpp>
-#include <gst/gst.h>
-#include <gio/gio.h>
-#include <gst/gstbus.h>
-#include <gst/app/gstappsink.h>
+#include <opencv2/core.hpp>
 
-#include "nativelib/static_gstreamer.h"
+using namespace quest_teleop;
 
 
 namespace {
@@ -36,9 +35,6 @@ namespace {
         const int RIGHT = 1;
         const int COUNT = 2;
     }  // namespace Side
-
-    constexpr int kStreamWidth = 1920;
-    constexpr int kStreamHeight = 1080;
 
     inline std::string GetXrVersionString(XrVersion ver) {
         return Fmt("%d.%d.%d", XR_VERSION_MAJOR(ver), XR_VERSION_MINOR(ver), XR_VERSION_PATCH(ver));
@@ -112,472 +108,7 @@ namespace {
         }
         return referenceSpaceCreateInfo;
     }
-
-/* Functions below print the Capabilities in a human-friendly format */
-    static gboolean print_field(GQuark field, const GValue *value, gpointer pfx) {
-        gchar * str = gst_value_serialize(value);
-
-        Log::Write(Log::Level::Info,
-                   std::string((gchar *) pfx) + "   " + std::string(g_quark_to_string(field)) +
-                   ": " + std::string(str));
-        g_free(str);
-        return TRUE;
-    }
-
-    static void print_caps(const GstCaps *caps, const gchar *pfx) {
-        guint i;
-
-        g_return_if_fail (caps != NULL);
-
-        if (gst_caps_is_any(caps)) {
-            Log::Write(Log::Level::Info, std::string(pfx) + "ANY");
-            return;
-        }
-        if (gst_caps_is_empty(caps)) {
-            Log::Write(Log::Level::Info, std::string(pfx) + "EMPTY");
-            return;
-        }
-
-        for (i = 0; i < gst_caps_get_size(caps); i++) {
-            GstStructure *structure = gst_caps_get_structure(caps, i);
-
-            Log::Write(Log::Level::Info,
-                       std::string(pfx) + std::string(gst_structure_get_name(structure)));
-            gst_structure_foreach(structure, print_field, (gpointer) pfx);
-        }
-    }
-
-/* Prints information about a Pad Template, including its Capabilities */
-    static void print_pad_templates_information(GstElementFactory *factory) {
-        const GList *pads;
-        GstStaticPadTemplate *padtemplate;
-
-        Log::Write(Log::Level::Info,
-                   "Pad Templates for " + std::string(gst_element_factory_get_longname (factory)));
-        if (!gst_element_factory_get_num_pad_templates(factory)) {
-            Log::Write(Log::Level::Info, "  none");
-            return;
-        }
-
-        pads = gst_element_factory_get_static_pad_templates(factory);
-        while (pads) {
-            padtemplate = (GstStaticPadTemplate *) pads->data;
-            pads = g_list_next (pads);
-
-            if (padtemplate->direction == GST_PAD_SRC)
-                Log::Write(Log::Level::Info,
-                           "  SRC template: '" + std::string(padtemplate->name_template) + "'\n");
-            else if (padtemplate->direction == GST_PAD_SINK)
-                Log::Write(Log::Level::Info,
-                           "  SINK template: '" + std::string(padtemplate->name_template) + "'\n");
-            else
-                Log::Write(Log::Level::Info,
-                           "  UNKNOWN!!! template: '" + std::string(padtemplate->name_template) +
-                           "'\n");
-
-            if (padtemplate->presence == GST_PAD_ALWAYS)
-                Log::Write(Log::Level::Info, "    Availability: Always\n");
-            else if (padtemplate->presence == GST_PAD_SOMETIMES)
-                Log::Write(Log::Level::Info, "    Availability: Sometimes\n");
-            else if (padtemplate->presence == GST_PAD_REQUEST)
-                Log::Write(Log::Level::Info, "    Availability: On request\n");
-            else
-                Log::Write(Log::Level::Info, "    Availability: UNKNOWN!!!\n");
-
-            if (padtemplate->static_caps.string) {
-                GstCaps *caps;
-                Log::Write(Log::Level::Info, "    Capabilities:\n");
-                caps = gst_static_caps_get(&padtemplate->static_caps);
-                print_caps(caps, "      ");
-                gst_caps_unref(caps);
-
-            }
-        }
-    }
-
-/* Shows the CURRENT capabilities of the requested pad in the given element */
-    static void print_pad_capabilities(GstElement *element, gchar *pad_name) {
-        GstPad *pad = NULL;
-        GstCaps *caps = NULL;
-
-        /* Retrieve pad */
-        pad = gst_element_get_static_pad(element, pad_name);
-        if (!pad) {
-            Log::Write(Log::Level::Error, "Could not retrieve pad '" + std::string(pad_name) + "'");
-            return;
-        }
-
-        /* Retrieve negotiated caps (or acceptable caps if negotiation is not finished yet) */
-        caps = gst_pad_get_current_caps(pad);
-        if (!caps)
-            caps = gst_pad_query_caps(pad, NULL);
-
-        /* Print and free */
-        Log::Write(Log::Level::Info, "Caps for the " + std::string(pad_name) + "pad:");
-        print_caps(caps, "      ");
-        gst_caps_unref(caps);
-        gst_object_unref(pad);
-    }
-
-    class TimeRecorder {
-
-    public:
-        explicit TimeRecorder(bool reinitialize = false) : start_{
-                std::chrono::high_resolution_clock::now()}, reinitialize_{reinitialize} {
-
-        }
-
-        void LogElapsedTime(const std::string &message = "") {
-            auto duration = std::chrono::high_resolution_clock::now() - start_;
-            Log::Write(Log::Level::Info, message +
-                                         std::to_string(
-                                                 std::chrono::nanoseconds(duration).count()));
-            if (reinitialize_) {
-                start_ = std::chrono::high_resolution_clock::now();
-            }
-        }
-
-    private:
-        std::chrono::high_resolution_clock::time_point start_;
-        bool reinitialize_;
-    };
-
-    class Pipeline {
-        //delete copy constructor
-        Pipeline(const Pipeline &) = delete;
-
-        // delete copy assignment
-        Pipeline &operator=(const Pipeline &) = delete;
-
-    public:
-        static void InitializeGStreamer() {
-            if (!is_initialized) {
-                gst_init_static_plugins();
-                Log::Write(Log::Level::Verbose, "Initializing gstreamer");
-                gst_init(nullptr, nullptr);
-                is_initialized = true;
-            }
-        }
-
-        Pipeline(const std::string &pipeline) : pipeline_{pipeline}, m_width{-1}, m_height{-1} {
-            InitializeGStreamer();
-
-            origin = i == 0 ? "[Left]" : "[Right]";
-
-            Log::Write(Log::Level::Info, origin + "Created context");
-            m_dataContext = g_main_context_new();
-            g_main_context_push_thread_default(m_dataContext);
-            GError *error = nullptr;
-            m_pipeline = gst_parse_launch(pipeline_.c_str(), &error);
-            Log::Write(Log::Level::Info, origin + "Checking the pipeline");
-            if (error) {
-                Log::Write(Log::Level::Info, origin + "pipeline not created");
-                gchar * message = g_strdup_printf("Unable to build pipeline: %s", error->message);
-                g_clear_error(&error);
-                Log::Write(Log::Level::Error, message);
-                g_free(message);
-            }
-
-            Log::Write(Log::Level::Info, origin + "Getting the appsink");
-            std::string appSinkStr = std::string("appsink") + std::to_string(i);
-            m_appSink = (GstAppSink *) (
-                    gst_bin_get_by_name((GstBin *) (m_pipeline), appSinkStr.c_str()));
-            if (!m_appSink) {
-                Log::Write(Log::Level::Error, origin + "couldn't find appsink");
-            }
-
-            std::string videoConvertStr = "videoconvert" + std::to_string(i);
-            m_vc_factory =
-                    gst_bin_get_by_name((GstBin *) (m_pipeline), videoConvertStr.c_str());
-            if (!m_vc_factory) {
-                Log::Write(Log::Level::Error,
-                           origin + "Couldn't find videoconvert factory element");
-            } else {
-                Log::Write(Log::Level::Info,
-                           origin + "Pad capabilities before receiving the stream.");
-                print_pad_capabilities(m_vc_factory, "sink");
-            }
-
-            // appsink and videoconvert names are increased for each pipeline
-            i++;
-
-            Log::Write(Log::Level::Info, origin + "Setting pipeline to playing");
-            /* Start playing */
-            auto ret = gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
-            if (ret == GST_STATE_CHANGE_FAILURE) {
-                Log::Write(Log::Level::Error,
-                           origin + "Unable to set the pipeline to the playing state.");
-            } else {
-                Log::Write(Log::Level::Info, origin + "Pipeline is playing");
-
-                Log::Write(Log::Level::Info, origin + "First query");
-                /* Wait until error or EOS */
-                m_bus = gst_element_get_bus(m_pipeline);
-                m_msg = gst_bus_timed_pop_filtered(m_bus, 10000000,
-                                                   (GstMessageType) (GST_MESSAGE_ERROR |
-                                                                     GST_MESSAGE_EOS));
-                if (m_msg) {
-                    if (GST_MESSAGE_TYPE(m_msg) == GST_MESSAGE_ERROR) {
-                        Log::Write(Log::Level::Warning, origin + "An error occurred! ");
-                    }
-                    GError *err;
-                    gchar * debug_info;
-
-                    if (GST_MESSAGE_TYPE(m_msg) == GST_MESSAGE_ERROR) {
-                        gst_message_parse_error(m_msg, &err, &debug_info);
-                        Log::Write(Log::Level::Warning,
-                                   std::string(origin + "Error received from element ") +
-                                   std::string(GST_OBJECT_NAME(m_msg->src)) +
-                                   std::string(err->message));
-
-                        Log::Write(Log::Level::Warning,
-                                   std::string(origin + "Debugging information: ") +
-                                   std::string(
-                                           debug_info ? debug_info : "none"));
-                        g_clear_error(&err);
-                        g_free(debug_info);
-                    }
-                    gst_message_unref(m_msg);
-                }
-
-                m_thread = std::make_unique<std::thread>(&Pipeline::SampleReader, this);
-            }
-        }
-
-        ~Pipeline() {
-            m_exit = true;
-            if (m_thread) {
-                m_thread->join();
-            }
-
-            /* Free resources */
-
-            if (m_msg) {
-                gst_message_unref(m_msg);
-            }
-            if (m_bus) {
-                gst_object_unref(m_bus);
-            }
-
-            if (m_vc_factory) {
-                gst_object_unref(m_vc_factory);
-            }
-            g_main_context_pop_thread_default(m_dataContext);
-            g_main_context_unref(m_dataContext);
-            if (m_pipeline) {
-                gst_element_set_state(m_pipeline, GST_STATE_NULL);
-                if (m_appSink) {
-                    gst_object_unref(m_appSink);
-                }
-                gst_object_unref(m_pipeline);
-            }
-        }
-
-        void getPadProperty(GstElement *element, const gchar *pad_name, const gchar *property_name,
-                            int *value) {
-            GstPad *pad = gst_element_get_static_pad(element, pad_name);
-            if (!pad) {
-                Log::Write(Log::Level::Error,
-                           origin + "Could not retrieve pad '" + std::string(pad_name) + "'");
-                return;
-            }
-            GstCaps *caps = gst_pad_get_current_caps(pad);
-            if (!caps) {
-                caps = gst_pad_query_caps(pad, NULL);
-            }
-            if (!caps) {
-                Log::Write(Log::Level::Error,
-                           origin + "Could not retrieve caps for pad '" + std::string(pad_name) +
-                           "'");
-                return;
-            }
-            GstStructure *structure = gst_caps_get_structure(caps, 0);
-            if (!structure) {
-                Log::Write(Log::Level::Error, origin + "Could not retrieve structure for pad '" +
-                                              std::string(pad_name) + "'");
-                return;
-            }
-            if (!gst_structure_get_int(structure, property_name, value)) {
-                Log::Write(Log::Level::Error,
-                           origin + "Could not retrieve property '" + std::string(property_name) +
-                           "'");
-            }
-            gst_caps_unref(caps);
-            gst_object_unref(pad);
-        }
-
-        void SetVideoSize() {
-            print_pad_capabilities(m_vc_factory, "sink");
-            getPadProperty(m_vc_factory, "sink", "width", &m_width);
-            getPadProperty(m_vc_factory, "sink", "height", &m_height);
-        }
-
-        struct SampleRead {
-            // delete copy constructor
-            SampleRead(const SampleRead &) = delete;
-
-            // delete copy assignment
-            SampleRead &operator=(const SampleRead &) = delete;
-
-            SampleRead() {
-                image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4,
-                                cv::Scalar(0, 0, 200, 50));
-            }
-
-            ~SampleRead() {
-                if (buffer && mapped) {
-                    gst_buffer_unmap(buffer, &info);
-                }
-                if (sample) {
-                    gst_sample_unref(sample);
-                }
-            }
-
-            cv::Mat image;
-            GstMapInfo info;
-            GstBuffer *buffer = nullptr;
-            GstSample *sample = nullptr;
-            bool mapped = false;
-        };
-
-        void SampleReader() {
-            while (!m_exit) {
-                TimeRecorder timeRecorder = TimeRecorder(true);
-
-                m_msg = gst_bus_pop_filtered(m_bus,
-                                             (GstMessageType) (GST_MESSAGE_ERROR |
-                                                               GST_MESSAGE_EOS));
-
-                timeRecorder.LogElapsedTime(origin + "Pop filter returned after ");
-                {
-                    std::lock_guard<std::mutex> lock(m_mutex);
-                    if (m_samples.size() > kMaxSamples) {
-                        m_samples.pop_front();
-                    }
-                    m_samples.emplace_back();
-                }
-                timeRecorder.LogElapsedTime(origin + "Locking took ");
-
-                SampleRead &sampleRead = m_samples.back();
-                if (m_msg) {
-                    /* See next tutorial for proper error message handling/parsing */
-                    if (GST_MESSAGE_TYPE (m_msg) == GST_MESSAGE_ERROR) {
-                        Log::Write(Log::Level::Error,
-                                   origin +
-                                   "An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
-                                   "variable set for more details.");
-                    }
-
-                    sampleRead.image = cv::Mat(cv::Size(1680, 1760), CV_8UC4,
-                                               cv::Scalar(255, 255, 0, 100));
-                    cv::putText(sampleRead.image, "Error or End Video",
-                                cv::Point(1680 / 2, 1760 / 2),
-                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4,
-                                cv::LINE_AA);
-
-                    gst_message_unref(m_msg);
-                } else {
-                    Log::Write(Log::Level::Info, origin + "Getting sample");
-                    sampleRead.sample = gst_app_sink_pull_sample(m_appSink);
-                    timeRecorder.LogElapsedTime(origin + "Getting a sample took ");
-                    if (sampleRead.sample) {
-                        Log::Write(Log::Level::Info, "getting buffer");
-                        GstBufferList *bufferList = gst_sample_get_buffer_list(sampleRead.sample);
-                        timeRecorder.LogElapsedTime(origin + "Getting a buffer list took ");
-                        if (bufferList) {
-                            auto totalSize = gst_buffer_list_calculate_size(bufferList);
-                            auto length = gst_buffer_list_length(bufferList);
-                            std::stringstream ss;
-                            ss << "Total size of the sample is: " << totalSize
-                               << ". Length of the list is: " << length << ".";
-                            Log::Write(Log::Level::Info, ss.str());
-                        }
-                        sampleRead.buffer = gst_sample_get_buffer(sampleRead.sample);
-                        timeRecorder.LogElapsedTime(origin + "Getting a buffer sample took ");
-                        if (sampleRead.buffer) {
-                            Log::Write(Log::Level::Info, origin + "mapping");
-
-                            sampleRead.mapped = gst_buffer_map(sampleRead.buffer, &sampleRead.info,
-                                                               GST_MAP_READ);
-                            timeRecorder.LogElapsedTime(origin + "Mapping buffer took ");
-                            if (sampleRead.mapped) {
-                                const auto str_size =
-                                        std::string("Size is") +
-                                        std::to_string(sampleRead.info.size);
-
-                                if (m_width == -1) {
-                                    Log::Write(Log::Level::Warning,
-                                               origin + "Width and height not set");
-                                    SetVideoSize();
-                                    // Log the width and height
-                                    Log::Write(Log::Level::Info,
-                                               origin + "Width: " + std::to_string(m_width) +
-                                               " Height: " + std::to_string(m_height));
-                                }
-
-                                if (sampleRead.info.size != m_width * m_height * 4) {
-                                    throw std::runtime_error(
-                                            "Size of the buffer is not as expected");
-                                }
-                                sampleRead.image = cv::Mat(cv::Size(m_width, m_height), CV_8UC4,
-                                                           sampleRead.info.data);
-
-                            }
-                        }
-                    }
-
-                    if (!sampleRead.sample || !sampleRead.buffer || !sampleRead.mapped) {
-                        sampleRead.image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4,
-                                                   cv::Scalar(0, 0, 200, 50));
-                    }
-                }
-
-            }
-        }
-
-        cv::Mat &GetImage() {
-            TimeRecorder timeRecorder = TimeRecorder(true);
-            std::lock_guard<std::mutex> lock(m_mutex);
-            timeRecorder.LogElapsedTime(origin + "Locking in getImage took ");
-            if (m_samples.size() <= 1) {
-                m_samples.emplace_front();
-                SampleRead &sample = m_samples.front();
-                sample.image = cv::Mat(cv::Size(kStreamWidth, kStreamHeight), CV_8UC4,
-                                       cv::Scalar(0, 0, 200, 50));
-            }
-            while (m_samples.size() > 2) {
-                m_samples.pop_front();
-            }
-            auto &image = m_samples.front().image;
-            return image;
-        }
-
-    private:
-        std::deque<SampleRead> m_samples;
-        static bool is_initialized;
-        static int i;
-        std::string pipeline_;
-        GstElement *m_pipeline;
-        GstBus *m_bus;
-        GstMessage *m_msg;
-        GstAppSink *m_appSink;
-        GMainContext *m_dataContext;
-        std::atomic<bool> m_exit{false};
-        std::unique_ptr<std::thread> m_thread;
-        std::mutex m_mutex;
-        static const int kMaxSamples = 10;
-
-        std::string origin;
-
-        GstElement *m_vc_factory;
-
-        int m_width;
-        int m_height;
-    };
-
-    int Pipeline::i = 0;
-    bool Pipeline::is_initialized = false;
-
+    
     struct OpenXrProgram : IOpenXrProgram {
         OpenXrProgram(const std::shared_ptr<Options> &options,
                       const std::shared_ptr<IPlatformPlugin> &platformPlugin,
@@ -588,6 +119,20 @@ namespace {
                   m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
                                          XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                          XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
+            // Read JSON config file
+            using json = nlohmann::json;
+            std::ifstream f("config.json");            
+            auto streams = json::parse(f);
+            
+            for (auto &stream : streams) {
+                StreamConfig streamConfig;
+                streamConfig.port = stream["port"];
+                streamConfig.position = {stream["position"][0], stream["position"][1], stream["position"][2]};
+                streamConfig.scale = {stream["scale"][0], stream["scale"][1], stream["scale"][2]};
+                streamConfig.type = stream["type"] == "Mono" ? StreamType::Mono : StreamType::Stereo;
+                streamConfig.codec = stream["codec"] == "H264" ? CodecType::H264 : stream["codec"] == "H265" ? CodecType::H265 : CodecType::AV1;
+                m_pipelines.push_back(std::make_unique<Pipeline>(streamConfig));
+            }
 
 
             Log::Write(Log::Level::Info, "Creating the pipelines");
@@ -597,7 +142,7 @@ namespace {
                 std::stringstream ss;
                 ss << "udpsrc port=" << port + i
                    << " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert ! video/x-raw,format=RGBA ! appsink";
-                m_pipelines[i] = std::make_unique<Pipeline>(ss.str());
+                
             }
 
             Log::Write(Log::Level::Warning, "All initialized!");
@@ -1680,7 +1225,7 @@ namespace {
         InputState m_input;
 
         const std::set<XrEnvironmentBlendMode> m_acceptableBlendModes;
-        std::unique_ptr<Pipeline> m_pipelines[2];
+        std::vector<std::unique_ptr<Pipeline>> m_pipelines;
     };
 }  // namespace
 

@@ -36,7 +36,8 @@ set(LOCAL_HEADERS
     options.h
     pch.h
     platformdata.h
-    platformplugin.h
+    platformplugin.h 
+    pipeline.h
 )
 set(LOCAL_SOURCE
     graphicsplugin_factory.cpp
@@ -48,7 +49,8 @@ set(LOCAL_SOURCE
     platformplugin_android.cpp
     platformplugin_factory.cpp
     platformplugin_posix.cpp
-    platformplugin_win32.cpp
+    platformplugin_win32.cpp 
+    pipeline.cpp
 )
 set(VULKAN_SHADERS vulkan_shaders/frag.glsl vulkan_shaders/vert.glsl)
 #set(VULKAN_SHADERS vulkan_shaders/shader.frag vulkan_shaders/shader.vert)
@@ -107,7 +109,7 @@ if(ANDROID)
             "${GSTREAMER_ROOT}/include/gstreamer-1.0"
             "${GSTREAMER_ROOT}/include/glib-2.0"
             "${GSTREAMER_ROOT}/lib/glib-2.0/include"
-            json/include)
+            )
     
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
     target_link_libraries(
@@ -145,6 +147,8 @@ target_include_directories(
         "${PROJECT_SOURCE_DIR}/src/tests/hello_xr/vulkan_shaders"        
         # for helper headers
         "${PROJECT_SOURCE_DIR}/external/include"
+        #json
+        "${PROJECT_SOURCE_DIR}/src/tests/hello_xr/json/include"
         # For including compiled shaders
         "${CMAKE_CURRENT_BINARY_DIR}"
 		# OpenCV

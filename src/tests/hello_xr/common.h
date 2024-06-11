@@ -10,8 +10,11 @@
 #include <memory>
 #include <stdarg.h>
 #include <stddef.h>
+#include <chrono>
 
 #include <openxr/openxr_reflection.h>
+
+#include "logger.h"
 
 // Macro to generate stringify functions for OpenXR enumerations based data provided in openxr_reflection.h
 // clang-format off
@@ -96,6 +99,29 @@ constexpr size_t ArraySize(const T (&unused)[Size]) noexcept {
     (void)unused;
     return Size;
 }
+
+class TimeRecorder {
+
+public:
+    explicit TimeRecorder(bool reinitialize = false) : start_{
+            std::chrono::high_resolution_clock::now()}, reinitialize_{reinitialize} {
+
+    }
+
+    void LogElapsedTime(const std::string &message = "") {
+        auto duration = std::chrono::high_resolution_clock::now() - start_;
+        Log::Write(Log::Level::Info, message +
+                                     std::to_string(
+                                             std::chrono::nanoseconds(duration).count()));
+        if (reinitialize_) {
+            start_ = std::chrono::high_resolution_clock::now();
+        }
+    }
+
+private:
+    std::chrono::high_resolution_clock::time_point start_;
+    bool reinitialize_;
+};
 
 #include "logger.h"
 #include "check.h"
