@@ -16,6 +16,7 @@
 #include <set>
 #include <string>
 #include <fstream>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include "pipeline.h"
 
@@ -121,19 +122,35 @@ namespace {
                                          XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
             // Read JSON config file
             using json = nlohmann::json;
-            std::ifstream f("config.json");            
+            std::ifstream f("assets/config/config.json");            
             auto streams = json::parse(f);
-            
-            for (auto &stream : streams["streams"]) {
+            Log::Write(Log::Level::Warning, "All initialized!");
+
+            for (auto it = streams["streams"].begin(); it != streams["streams"].end(); ++it) {
                 StreamConfig streamConfig;
-                streamConfig.name = stream;
-                auto& streamProps = stream[streamConfig.name];
-                streamConfig.port = streamProps["port"];
-                streamConfig.position = {streamProps["position"]["r"], streamProps["position"]["theta"], streamProps["position"]["phi"]};
-                streamConfig.scale = {streamProps["position"]["scale"], streamProps["position"]["scale"], streamProps["position"]["scale"]};
-                streamConfig.type = streamProps["type"] == "mono" ? StreamType::Mono : StreamType::Stereo;
-                streamConfig.codec = streamProps["codec"] == "h264" ? CodecType::H264 : streamProps["codec"] == "h265" ? CodecType::H265 : CodecType::AV1;
-                m_pipelines.push_back(std::make_unique<Pipeline>(streamConfig));
+                const auto& stream = it.value();
+                streamConfig.name = it.key();
+
+                streamConfig.type = stream["type"] == "mono" ? StreamType::Mono : StreamType::Stereo;
+                streamConfig.position = {stream["position"]["r"], stream["position"]["theta"], stream["position"]["phi"]};
+                streamConfig.scale = {stream["position"]["scale"], stream["position"]["scale"], stream["position"]["scale"]};
+                streamConfig.codec = stream["codec"] == "h264" ? CodecType::H264 : stream["codec"] == "h265" ? CodecType::H265 : CodecType::AV1;
+                streamConfig.side = (streamConfig.type ==  StreamType::Stereo)?PipelineSide::Both:PipelineSide::Left;
+#ifndef USE_STEREO_SIDE_BY_SIDE
+                if (streamConfig.type == StreamType::Mono) {
+#endif  // USE_STEREO_SIDE_BY_SIDE
+                    streamConfig.port = stream["port"];
+                    m_pipelines.push_back(std::make_unique<Pipeline>(streamConfig));
+#ifndef USE_STEREO_SIDE_BY_SIDE
+                } else {
+                    streamConfig.port = stream["left_port"];
+                    streamConfig.side = PipelineSide::Left;
+                    m_pipelines.push_back(std::make_unique<Pipeline>(streamConfig));
+                    streamConfig.port = stream["right_port"];
+                    streamConfig.side = PipelineSide::Right;
+                    m_pipelines.push_back(std::make_unique<Pipeline>(streamConfig));
+                }
+#endif  // USE_STEREO_SIDE_BY_SIDE
             }
 
             Log::Write(Log::Level::Warning, "All initialized!");
@@ -1142,8 +1159,14 @@ namespace {
                 if (m_pipelines[i]->GetPipelineType() == StreamType::Mono) {
                     mono_images.push_back(m_pipelines[i]->GetImage());
                 } else {
-                    left_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Left));
-                    right_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Right));
+                    if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Left)
+                        left_images.push_back(m_pipelines[i]->GetImage());
+                    else if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Right)
+                        right_images.push_back(m_pipelines[i]->GetImage());
+                    else { // m_pipelines[i]->GetPipelineSide() == PipelineSide::Both
+                        left_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Left));
+                        right_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Right));
+                    }
                 }
             }
             // Render view to the appropriate part of the swapchain image.

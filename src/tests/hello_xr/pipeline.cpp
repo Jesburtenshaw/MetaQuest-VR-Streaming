@@ -375,11 +375,11 @@ namespace quest_teleop {
                                 throw std::runtime_error(
                                         "Size of the buffer is not as expected");
                             }
-                            if (m_streamConfig.type == StreamType::Mono) {
-                                sampleRead.images[0] = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
+                            if (m_streamConfig.type == StreamType::Mono || m_streamConfig.side != PipelineSide::Both) {
+                                sampleRead.images[static_cast<int>(m_streamConfig.side)] = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
                                                            sampleRead.info.data);
-                            } else {
 
+                            } else {
                                 cv::Mat image = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
                                                         sampleRead.info.data);
                                 sampleRead.images[static_cast<int>(PipelineSide::Left)] = image(cv::Rect(0, 0, m_width / 2, m_height));
@@ -391,10 +391,18 @@ namespace quest_teleop {
                 }
 
                 if (!sampleRead.sample || !sampleRead.buffer || !sampleRead.mapped) {
-                    sampleRead.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                    sampleRead.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
                                                cv::Scalar(0, 0, 200));
-                    sampleRead.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                    sampleRead.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
                                                    cv::Scalar(0, 0, 200));
+                    cv::putText(sampleRead.images[0], "[left]"+ m_streamConfig.name,
+                                cv::Point(250, 250),
+                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
+                                cv::LINE_AA);
+                    cv::putText(sampleRead.images[0], "[right]"+ m_streamConfig.name,
+                                cv::Point(250, 250),
+                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
+                                cv::LINE_AA);
                 }
             }
 
@@ -402,18 +410,29 @@ namespace quest_teleop {
     }
 
     cv::Mat &Pipeline::GetImage(PipelineSide side) {
+        if (m_streamConfig.side != PipelineSide::Both) {
+            side = m_streamConfig.side;
+        }
         TimeRecorder timeRecorder = TimeRecorder(true);
         std::lock_guard<std::mutex> lock(m_mutex);
         timeRecorder.LogElapsedTime("Locking in getImage took ");
         if (m_samples.size() <= 1) {
             m_samples.emplace_front();
             SampleRead &sample = m_samples.front();
-            sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+            sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
                                    cv::Scalar(0, 0, 200));
-            sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+            sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
                                       cv::Scalar(0, 0, 200));
+            cv::putText(sample.images[0], "[left]"+ m_streamConfig.name,
+                        cv::Point(250, 250),
+                        cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
+                        cv::LINE_AA);
+            cv::putText(sample.images[0], "[right]"+ m_streamConfig.name,
+                        cv::Point(250, 250),
+                        cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
+                        cv::LINE_AA);
         }
-        while (m_samples.size() > 2 && side == PipelineSide::Left) {
+        while (m_samples.size() > 2 && ((side == PipelineSide::Left && m_streamConfig.side == PipelineSide::Both) || m_streamConfig.side != PipelineSide::Both)) {
             m_samples.pop_front();
         }
         auto &image = m_samples.front().images[static_cast<int>(side)];

@@ -33,11 +33,13 @@ namespace quest_teleop {
     
     enum class PipelineSide {
         Left,
-        Right
+        Right,
+        Both
     };
 
     struct StreamConfig {
         StreamType type;
+        PipelineSide side;
         CodecType codec;
         int port;
         XrVector3f position;
@@ -100,6 +102,10 @@ namespace quest_teleop {
 
         StreamType GetPipelineType() const {
             return m_streamConfig.type;
+        }
+        
+        PipelineSide GetPipelineSide() const {
+            return m_streamConfig.side;
         }
 
     private:
