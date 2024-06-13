@@ -34,7 +34,7 @@ struct IGraphicsPlugin {
 
     // Render to a swapchain image for a projection view.
     virtual void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-                            int64_t swapchainFormat, const cv::Mat& image_mat, const std::vector<Cube>& cubes) = 0;
+                            int64_t swapchainFormat, const std::vector<cv::Mat>& mono_images, const std::vector<cv::Mat>& stereo_images) = 0;
 
     // Get recommended number of sub-data element samples in view (recommendedSwapchainSampleCount)
     // if supported by the graphics plugin. A supported value otherwise.

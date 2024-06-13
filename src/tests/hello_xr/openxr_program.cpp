@@ -124,25 +124,16 @@ namespace {
             std::ifstream f("config.json");            
             auto streams = json::parse(f);
             
-            for (auto &stream : streams) {
+            for (auto &stream : streams["streams"]) {
                 StreamConfig streamConfig;
-                streamConfig.port = stream["port"];
-                streamConfig.position = {stream["position"][0], stream["position"][1], stream["position"][2]};
-                streamConfig.scale = {stream["scale"][0], stream["scale"][1], stream["scale"][2]};
-                streamConfig.type = stream["type"] == "Mono" ? StreamType::Mono : StreamType::Stereo;
-                streamConfig.codec = stream["codec"] == "H264" ? CodecType::H264 : stream["codec"] == "H265" ? CodecType::H265 : CodecType::AV1;
+                streamConfig.name = stream;
+                auto& streamProps = stream[streamConfig.name];
+                streamConfig.port = streamProps["port"];
+                streamConfig.position = {streamProps["position"]["r"], streamProps["position"]["theta"], streamProps["position"]["phi"]};
+                streamConfig.scale = {streamProps["position"]["scale"], streamProps["position"]["scale"], streamProps["position"]["scale"]};
+                streamConfig.type = streamProps["type"] == "mono" ? StreamType::Mono : StreamType::Stereo;
+                streamConfig.codec = streamProps["codec"] == "h264" ? CodecType::H264 : streamProps["codec"] == "h265" ? CodecType::H265 : CodecType::AV1;
                 m_pipelines.push_back(std::make_unique<Pipeline>(streamConfig));
-            }
-
-
-            Log::Write(Log::Level::Info, "Creating the pipelines");
-            /* Build the pipeline */
-            int port = 5004;
-            for (int i = 0; i < 2; ++i) {
-                std::stringstream ss;
-                ss << "udpsrc port=" << port + i
-                   << " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert ! video/x-raw,format=RGBA ! appsink";
-                
             }
 
             Log::Write(Log::Level::Warning, "All initialized!");
@@ -1121,35 +1112,40 @@ namespace {
                 }
             }
 
-            // Render a 10cm cube scaled by grabAction for each hand. Note renderHand will only be
-            // true when the application has focus.
-            for (auto hand : {Side::LEFT, Side::RIGHT}) {
-                XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
-                res = xrLocateSpace(m_input.handSpace[hand], m_appSpace, predictedDisplayTime, &spaceLocation);
-                CHECK_XRRESULT(res, "xrLocateSpace");
-                if (XR_UNQUALIFIED_SUCCESS(res)) {
-                    if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
-                        (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-                        float scale = 0.1f * m_input.handScale[hand];
-                        cubes.push_back(Cube{spaceLocation.pose, {scale, scale, scale}});
-                    }
+//            // Render a 10cm cube scaled by grabAction for each hand. Note renderHand will only be
+//            // true when the application has focus.
+//            for (auto hand : {Side::LEFT, Side::RIGHT}) {
+//                XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
+//                res = xrLocateSpace(m_input.handSpace[hand], m_appSpace, predictedDisplayTime, &spaceLocation);
+//                CHECK_XRRESULT(res, "xrLocateSpace");
+//                if (XR_UNQUALIFIED_SUCCESS(res)) {
+//                    if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+//                        (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+//                        float scale = 0.1f * m_input.handScale[hand];
+//                        cubes.push_back(Cube{spaceLocation.pose, {scale, scale, scale}});
+//                    }
+//                } else {
+//                    // Tracking loss is expected when the hand is not active so only log a message
+//                    // if the hand is active.
+//                    if (m_input.handActive[hand] == XR_TRUE) {
+//                        const char* handName[] = {"left", "right"};
+//                        Log::Write(Log::Level::Verbose,
+//                                   Fmt("Unable to locate %s hand action space in app space: %d", handName[hand], res));
+//                    }
+//                }
+//            }
+
+            std::vector<cv::Mat> mono_images;
+            std::vector<cv::Mat> left_images;
+            std::vector<cv::Mat> right_images;
+            for (auto i = 0; i < m_pipelines.size(); i++) {
+                if (m_pipelines[i]->GetPipelineType() == StreamType::Mono) {
+                    mono_images.push_back(m_pipelines[i]->GetImage());
                 } else {
-                    // Tracking loss is expected when the hand is not active so only log a message
-                    // if the hand is active.
-                    if (m_input.handActive[hand] == XR_TRUE) {
-                        const char* handName[] = {"left", "right"};
-                        Log::Write(Log::Level::Verbose,
-                                   Fmt("Unable to locate %s hand action space in app space: %d", handName[hand], res));
-                    }
+                    left_images.push_back(m_pipelines[i]->GetImage(Side::Left));
+                    right_images.push_back(m_pipelines[i]->GetImage(Side::Right));
                 }
             }
-#define QUEST_TELEOP_SIDE_BY_SIDE
-#ifdef QUEST_TELEOP_SIDE_BY_SIDE
-            cv::Mat &images = m_pipelines[0]->GetImage();
-            std::vector<cv::Mat> sides = std::vector<cv::Mat>(2);
-            sides[0] = images(cv::Rect(0, 0, images.cols / 2, images.rows));
-            sides[1] = images(cv::Rect(images.cols / 2, 0, images.cols / 2, images.rows));
-#endif
             // Render view to the appropriate part of the swapchain image.
             for (uint32_t i = 0; i < viewCountOutput; i++) {
                 // Each view has a separate swapchain which is acquired, rendered to, and released.
@@ -1172,16 +1168,12 @@ namespace {
                 projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
                 projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width,
                                                                      viewSwapchain.height};
-#ifndef QUEST_TELEOP_SIDE_BY_SIDE
-                cv::Mat &image = m_pipelines[i]->GetImage();
-#else
-                cv::Mat &image = sides[i];
-#endif
+
                 TimeRecorder timeRecorder(true);
 
                 const XrSwapchainImageBaseHeader *const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
                 m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage,
-                                             m_colorSwapchainFormat, image, cubes);
+                                             m_colorSwapchainFormat, mono_images, i == 0? left_images:right_images);
 
                 XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
                 CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));

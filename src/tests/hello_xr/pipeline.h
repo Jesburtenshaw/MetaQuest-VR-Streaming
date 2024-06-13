@@ -30,6 +30,11 @@ namespace quest_teleop {
         H265,
         AV1
     };
+    
+    enum class Side {
+        Left,
+        Right
+    };
 
     struct StreamConfig {
         StreamType type;
@@ -48,8 +53,10 @@ namespace quest_teleop {
         SampleRead &operator=(const SampleRead &) = delete;
 
         SampleRead() {
-            image = cv::Mat(cv::Size(10, 10), CV_8UC4,
-                            cv::Scalar(0, 0, 200, 50));
+            images[0] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                            cv::Scalar(0, 0, 200));
+            images[1] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                            cv::Scalar(0, 0, 200));
         }
 
         ~SampleRead() {
@@ -61,7 +68,7 @@ namespace quest_teleop {
             }
         }
 
-        cv::Mat image;
+        cv::Mat images[2];
         GstMapInfo info;
         GstBuffer *buffer = nullptr;
         GstSample *sample = nullptr;
@@ -89,7 +96,11 @@ namespace quest_teleop {
 
         void SampleReader();
 
-        cv::Mat &GetImage();
+        cv::Mat &GetImage(Side side=Side::Left);
+
+        StreamType GetPipelineType() const {
+            return m_streamConfig.type;
+        }
 
     private:
         std::deque <SampleRead> m_samples;
@@ -105,17 +116,12 @@ namespace quest_teleop {
         std::mutex m_mutex;
         static const int kMaxSamples = 10;
 
-        std::string origin;
-
         GstElement *m_vc_factory;
 
         int m_width;
         int m_height;   
         StreamConfig m_streamConfig;
     };
-
-    bool Pipeline::is_initialized = false;
-
 }   // namespace quest_teleop
 
 #endif //HELLO_XR_PIPELINE_H

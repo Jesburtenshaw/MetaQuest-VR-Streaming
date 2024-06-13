@@ -1,5 +1,6 @@
 #include "pipeline.h"
 
+#include <opencv2/imgproc.hpp>
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
 #include <gst/gstbus.h>
@@ -121,7 +122,8 @@ namespace quest_teleop {
         }
     } // namespace
 
-
+    bool Pipeline::is_initialized = false;
+    
     void Pipeline::InitializeGStreamer() {
         if (!is_initialized) {
             gst_init_static_plugins();
@@ -131,12 +133,7 @@ namespace quest_teleop {
         }
     }
 
-    Pipeline::Pipeline(const StreamConfig &streamConfig) : m_streamConfig{streamConfig},
-
-                                                           m_width{
-                                                                   -1
-                                                           }, m_height{
-                    -1} {
+    Pipeline::Pipeline(const StreamConfig &streamConfig) : m_streamConfig{streamConfig}, m_width{-1}, m_height{-1} {
         InitializeGStreamer();
 
         Log::Write(Log::Level::Info, "Created context");
@@ -205,7 +202,7 @@ namespace quest_teleop {
                     gst_message_parse_error(m_msg, &err, &debug_info
                     );
                     Log::Write(Log::Level::Warning,
-                               std::string(origin + "Error received from element ")
+                               std::string("Error received from element ")
                                +
                                std::string(GST_OBJECT_NAME(m_msg->src)
                                ) +
@@ -259,9 +256,7 @@ namespace quest_teleop {
         }
     }
 
-    void
-    Pipeline::getPadProperty(GstElement *element, const gchar *pad_name, const gchar *property_name,
-                             int *value) {
+    void Pipeline::getPadProperty(GstElement *element, const gchar *pad_name, const gchar *property_name, int *value) {
         GstPad *pad = gst_element_get_static_pad(element, pad_name);
         if (!pad) {
             Log::Write(Log::Level::Error,
@@ -307,7 +302,7 @@ namespace quest_teleop {
                                          (GstMessageType)(GST_MESSAGE_ERROR |
                                                           GST_MESSAGE_EOS));
 
-            timeRecorder.LogElapsedTime(origin + "Pop filter returned after ");
+            timeRecorder.LogElapsedTime("Pop filter returned after ");
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 if (m_samples.size() > kMaxSamples) {
@@ -315,7 +310,7 @@ namespace quest_teleop {
                 }
                 m_samples.emplace_back();
             }
-            timeRecorder.LogElapsedTime(origin + "Locking took ");
+            timeRecorder.LogElapsedTime("Locking took ");
 
             SampleRead &sampleRead = m_samples.back();
             if (m_msg) {
@@ -325,13 +320,14 @@ namespace quest_teleop {
                                "An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
                                "variable set for more details.");
                 }
-
-                sampleRead.image = cv::Mat(cv::Size(1680, 1760), CV_8UC4,
-                                           cv::Scalar(255, 255, 0, 100));
-                cv::putText(sampleRead.image, "Error or End Video",
-                            cv::Point(1680 / 2, 1760 / 2),
-                            cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0, 200), 4,
-                            cv::LINE_AA);
+                for (int i = 0; i < 2; ++i) {
+                    sampleRead.images[i] = cv::Mat(cv::Size(1680, 1760), CV_8UC3,
+                                                   cv::Scalar(255, 255, 0));
+                    cv::putText(sampleRead.images[i], "Error or End Video",
+                                cv::Point(1680 / 2, 1760 / 2),
+                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
+                                cv::LINE_AA);
+                }
 
                 gst_message_unref(m_msg);
             } else {
@@ -373,40 +369,52 @@ namespace quest_teleop {
                                            " Height: " + std::to_string(m_height));
                             }
 
-                            if (sampleRead.info.size != m_width * m_height * 4) {
+                            if (sampleRead.info.size != m_width * m_height * 3) {
                                 throw std::runtime_error(
                                         "Size of the buffer is not as expected");
                             }
-                            sampleRead.image = cv::Mat(cv::Size(m_width, m_height), CV_8UC4,
-                                                       sampleRead.info.data);
+                            if (m_streamConfig.type == StreamType::Mono) {
+                                sampleRead.images[0] = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
+                                                           sampleRead.info.data);
+                            } else {
+
+                                cv::Mat image = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
+                                                        sampleRead.info.data);
+                                sampleRead.images[static_cast<int>(Side::Left)] = image(cv::Rect(0, 0, m_width / 2, m_height));
+                                sampleRead.images[static_cast<int>(Side::Right)] = image(cv::Rect(m_width / 2, 0, m_width / 2, m_height));
+                            }
 
                         }
                     }
                 }
 
                 if (!sampleRead.sample || !sampleRead.buffer || !sampleRead.mapped) {
-                    sampleRead.image = cv::Mat(cv::Size(10, 10), CV_8UC4,
-                                               cv::Scalar(0, 0, 200, 50));
+                    sampleRead.images[static_cast<int>(Side::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                                               cv::Scalar(0, 0, 200));
+                    sampleRead.images[static_cast<int>(Side::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                                                   cv::Scalar(0, 0, 200));
                 }
             }
 
         }
     }
 
-    cv::Mat &Pipeline::GetImage() {
+    cv::Mat &Pipeline::GetImage(Side side) {
         TimeRecorder timeRecorder = TimeRecorder(true);
         std::lock_guard<std::mutex> lock(m_mutex);
         timeRecorder.LogElapsedTime("Locking in getImage took ");
         if (m_samples.size() <= 1) {
             m_samples.emplace_front();
             SampleRead &sample = m_samples.front();
-            sample.image = cv::Mat(cv::Size(10, 10), CV_8UC4,
-                                   cv::Scalar(0, 0, 200, 50));
+            sample.images[static_cast<int>(Side::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                                   cv::Scalar(0, 0, 200));
+            sample.images[static_cast<int>(Side::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                                      cv::Scalar(0, 0, 200));
         }
-        while (m_samples.size() > 2) {
+        while (m_samples.size() > 2 && side == Side::Left) {
             m_samples.pop_front();
         }
-        auto &image = m_samples.front().image;
+        auto &image = m_samples.front().images[static_cast<int>(side)];
         return image;
     }
 } // namespace quest_teleop
