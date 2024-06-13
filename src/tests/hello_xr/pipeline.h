@@ -31,7 +31,7 @@ namespace quest_teleop {
         AV1
     };
     
-    enum class Side {
+    enum class PipelineSide {
         Left,
         Right
     };
@@ -96,7 +96,7 @@ namespace quest_teleop {
 
         void SampleReader();
 
-        cv::Mat &GetImage(Side side=Side::Left);
+        cv::Mat &GetImage(PipelineSide side=PipelineSide::Left);
 
         StreamType GetPipelineType() const {
             return m_streamConfig.type;
@@ -105,7 +105,6 @@ namespace quest_teleop {
     private:
         std::deque <SampleRead> m_samples;
         static bool is_initialized;
-        std::string pipeline_;
         GstElement *m_pipeline;
         GstBus *m_bus;
         GstMessage *m_msg;

@@ -1142,8 +1142,8 @@ namespace {
                 if (m_pipelines[i]->GetPipelineType() == StreamType::Mono) {
                     mono_images.push_back(m_pipelines[i]->GetImage());
                 } else {
-                    left_images.push_back(m_pipelines[i]->GetImage(Side::Left));
-                    right_images.push_back(m_pipelines[i]->GetImage(Side::Right));
+                    left_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Left));
+                    right_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Right));
                 }
             }
             // Render view to the appropriate part of the swapchain image.

@@ -135,12 +135,16 @@ namespace quest_teleop {
 
     Pipeline::Pipeline(const StreamConfig &streamConfig) : m_streamConfig{streamConfig}, m_width{-1}, m_height{-1} {
         InitializeGStreamer();
+        
+        // Onstructing pipeline string
+        auto portStr = std::to_string(m_streamConfig.port);
+        std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert name=videoconvert"+ portStr +" ! video/x-raw,format=RGB ! appsink name=appsink" + portStr;
 
         Log::Write(Log::Level::Info, "Created context");
         m_dataContext = g_main_context_new();
         g_main_context_push_thread_default(m_dataContext);
         GError *error = nullptr;
-        m_pipeline = gst_parse_launch(pipeline_.c_str(), &error);
+        m_pipeline = gst_parse_launch(pipeline.c_str(), &error);
         Log::Write(Log::Level::Info, "Checking the pipeline");
         if (error) {
             Log::Write(Log::Level::Info, "pipeline not created");
@@ -152,14 +156,14 @@ namespace quest_teleop {
         }
 
         Log::Write(Log::Level::Info, "Getting the appsink");
-        std::string appSinkStr = std::string("appsink");
+        std::string appSinkStr = "appsink" + portStr;
         m_appSink = (GstAppSink * )(
                 gst_bin_get_by_name((GstBin * )(m_pipeline), appSinkStr.c_str()));
         if (!m_appSink) {
             Log::Write(Log::Level::Error, "couldn't find appsink");
         }
 
-        std::string videoConvertStr = "videoconvert";
+        std::string videoConvertStr = "videoconvert" + portStr;
         m_vc_factory =
                 gst_bin_get_by_name((GstBin * )(m_pipeline), videoConvertStr.c_str());
         if (!m_vc_factory) {
@@ -223,9 +227,7 @@ namespace quest_teleop {
 
             m_thread = std::make_unique<std::thread>(&Pipeline::SampleReader, this);
         }
-    }
-
-    
+    }    
 
     Pipeline::~Pipeline() {
         m_exit = true;
@@ -380,8 +382,8 @@ namespace quest_teleop {
 
                                 cv::Mat image = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
                                                         sampleRead.info.data);
-                                sampleRead.images[static_cast<int>(Side::Left)] = image(cv::Rect(0, 0, m_width / 2, m_height));
-                                sampleRead.images[static_cast<int>(Side::Right)] = image(cv::Rect(m_width / 2, 0, m_width / 2, m_height));
+                                sampleRead.images[static_cast<int>(PipelineSide::Left)] = image(cv::Rect(0, 0, m_width / 2, m_height));
+                                sampleRead.images[static_cast<int>(PipelineSide::Right)] = image(cv::Rect(m_width / 2, 0, m_width / 2, m_height));
                             }
 
                         }
@@ -389,9 +391,9 @@ namespace quest_teleop {
                 }
 
                 if (!sampleRead.sample || !sampleRead.buffer || !sampleRead.mapped) {
-                    sampleRead.images[static_cast<int>(Side::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                    sampleRead.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
                                                cv::Scalar(0, 0, 200));
-                    sampleRead.images[static_cast<int>(Side::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+                    sampleRead.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
                                                    cv::Scalar(0, 0, 200));
                 }
             }
@@ -399,19 +401,19 @@ namespace quest_teleop {
         }
     }
 
-    cv::Mat &Pipeline::GetImage(Side side) {
+    cv::Mat &Pipeline::GetImage(PipelineSide side) {
         TimeRecorder timeRecorder = TimeRecorder(true);
         std::lock_guard<std::mutex> lock(m_mutex);
         timeRecorder.LogElapsedTime("Locking in getImage took ");
         if (m_samples.size() <= 1) {
             m_samples.emplace_front();
             SampleRead &sample = m_samples.front();
-            sample.images[static_cast<int>(Side::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+            sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
                                    cv::Scalar(0, 0, 200));
-            sample.images[static_cast<int>(Side::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
+            sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(10, 10), CV_8UC3,
                                       cv::Scalar(0, 0, 200));
         }
-        while (m_samples.size() > 2 && side == Side::Left) {
+        while (m_samples.size() > 2 && side == PipelineSide::Left) {
             m_samples.pop_front();
         }
         auto &image = m_samples.front().images[static_cast<int>(side)];
