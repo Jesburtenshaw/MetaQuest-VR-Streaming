@@ -1,3 +1,5 @@
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "EmptyDeclOrStmt"
 // Copyright (c) 2017-2024, The Khronos Group Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
@@ -197,6 +199,8 @@ namespace {
                 streamConfig.type = stream["type"] == "mono" ? StreamType::Mono : StreamType::Stereo;
                 streamConfig.position = {stream["position"]["r"], stream["position"]["theta"], stream["position"]["phi"]};
                 streamConfig.scale = {stream["position"]["scale"], stream["position"]["scale"], stream["position"]["scale"]};
+                streamConfig.width = stream["width"];
+                streamConfig.height = stream["height"];
                 streamConfig.codec = stream["codec"] == "h264" ? CodecType::H264 : stream["codec"] == "h265" ? CodecType::H265 : CodecType::AV1;
                 streamConfig.side = (streamConfig.type ==  StreamType::Stereo)?PipelineSide::Both:PipelineSide::Left;
 #ifndef USE_STEREO_SIDE_BY_SIDE
@@ -214,6 +218,7 @@ namespace {
                     m_pipelines.push_back(std::make_unique<Pipeline>(streamConfig));
                 }
 #endif  // USE_STEREO_SIDE_BY_SIDE
+            m_streamConfigVec.push_back(streamConfig);
             }
 
             Log::Write(Log::Level::Warning, "All initialized!");
@@ -480,7 +485,7 @@ namespace {
 
             // The graphics API can initialize the graphics device now that the systemId and instance
             // handle are available.
-            m_graphicsPlugin->InitializeDevice(m_instance, m_systemId);
+            m_graphicsPlugin->InitializeDevice(m_instance, m_systemId, m_streamConfigVec);
         }
 
         void LogReferenceSpaces() {
@@ -1215,20 +1220,20 @@ namespace {
 //                }
 //            }
 
-            std::vector<cv::Mat> mono_images;
-            std::vector<cv::Mat> stereo_images[2];            
+            std::map<std::string, cv::Mat> mono_images;
+            std::map<std::string, cv::Mat> stereo_images[2];            
             for (auto i = 0; i < m_pipelines.size(); i++) {
                 Log::Write(Log::Level::Info, Fmt("Getting image from pipeline: %s, %d", m_pipelines[i]->GetPipelineName().c_str(), m_pipelines[i]->GetPipelineType()));
                 if (m_pipelines[i]->GetPipelineType() == StreamType::Mono) {
-                    mono_images.push_back(m_pipelines[i]->GetImage());
+                    mono_images.insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage()});
                 } else {
                     if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Left)
-                        stereo_images[static_cast<int>(PipelineSide::Left)].push_back(m_pipelines[i]->GetImage());
+                        stereo_images[static_cast<int>(PipelineSide::Left)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage()});
                     else if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Right)
-                        stereo_images[static_cast<int>(PipelineSide::Right)].push_back(m_pipelines[i]->GetImage());
+                        stereo_images[static_cast<int>(PipelineSide::Right)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage()});
                     else { // m_pipelines[i]->GetPipelineSide() == PipelineSide::Both
-                        stereo_images[static_cast<int>(PipelineSide::Left)].push_back(m_pipelines[i]->GetImage(PipelineSide::Left));
-                        stereo_images[static_cast<int>(PipelineSide::Right)].push_back(m_pipelines[i]->GetImage(PipelineSide::Right));
+                        stereo_images[static_cast<int>(PipelineSide::Left)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage(PipelineSide::Left)});
+                        stereo_images[static_cast<int>(PipelineSide::Right)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage(PipelineSide::Right)});
                     }
                 }
             }
@@ -1306,6 +1311,7 @@ namespace {
 
         const std::set<XrEnvironmentBlendMode> m_acceptableBlendModes;
         std::vector<std::unique_ptr<Pipeline>> m_pipelines;
+        std::vector<StreamConfig> m_streamConfigVec;
     };
 }  // namespace
 
@@ -1314,3 +1320,5 @@ std::shared_ptr<IOpenXrProgram> CreateOpenXrProgram(const std::shared_ptr<Option
                                                     const std::shared_ptr<IGraphicsPlugin>& graphicsPlugin) {
     return std::make_shared<OpenXrProgram>(options, platformPlugin, graphicsPlugin);
 }
+
+#pragma clang diagnostic pop

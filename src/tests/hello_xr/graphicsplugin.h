@@ -5,6 +5,7 @@
 #pragma once
 
 #include <opencv2/opencv.hpp>
+#include "pipeline.h"
 
 struct Cube {
     XrPosef Pose;
@@ -19,7 +20,7 @@ struct IGraphicsPlugin {
     virtual std::vector<std::string> GetInstanceExtensions() const = 0;
 
     // Create an instance of this graphics api for the provided instance and systemId.
-    virtual void InitializeDevice(XrInstance instance, XrSystemId systemId) = 0;
+    virtual void InitializeDevice(XrInstance instance, XrSystemId systemId, const std::vector<quest_teleop::StreamConfig>& streamConfigVec) = 0;
 
     // Select the preferred swapchain format from the list of available formats.
     virtual int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& runtimeFormats) const = 0;
@@ -34,7 +35,7 @@ struct IGraphicsPlugin {
 
     // Render to a swapchain image for a projection view.
     virtual void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-                            int64_t swapchainFormat, const std::vector<cv::Mat>& mono_images, const std::vector<cv::Mat>& stereo_images) = 0;
+                            int64_t swapchainFormat, const std::map<std::string, cv::Mat>& mono_images, const std::map<std::string, cv::Mat>& stereo_images) = 0;
 
     // Get recommended number of sub-data element samples in view (recommendedSwapchainSampleCount)
     // if supported by the graphics plugin. A supported value otherwise.

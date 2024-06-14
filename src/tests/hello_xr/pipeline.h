@@ -45,6 +45,8 @@ namespace quest_teleop {
         XrVector3f position;
         XrVector3f scale;
         std::string name;
+        int width;
+        int height;
     };
     
     struct SampleRead {

@@ -1,3 +1,5 @@
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "EmptyDeclOrStmt"
 // Copyright (c) 2017-2024, The Khronos Group Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
@@ -7,6 +9,7 @@
 #include "geometry.h"
 #include "graphicsplugin.h"
 #include "options.h"
+#include "pipeline.h"
 
 #include <opencv2/opencv.hpp>
 
@@ -753,37 +756,265 @@ struct RenderTarget {
     VkDevice m_vkDevice{VK_NULL_HANDLE};
 };
 
+    struct PipelineScreenLayout {
+        VkDescriptorPool descriptorPool;
+        VkDescriptorSet descriptorSets;
+        VkBuffer uniformBuffer;
+        VkDeviceMemory uniformBufferMemory;
+        void* uniformBufferMapped{nullptr};
+        VkPhysicalDevice vkPhysicalDevice{VK_NULL_HANDLE};
+        VkImage textureImage_y;
+        VkImage textureImage_u;
+        VkImage textureImage_v;
+        VkImageView textureImageView_y;
+        VkImageView textureImageView_u;
+        VkImageView textureImageView_v;
+        VkDeviceMemory textureImageMemory_y;
+        VkDeviceMemory textureImageMemory_u;
+        VkDeviceMemory textureImageMemory_v;
+        VkSampler textureSampler_y;
+        VkSampler textureSampler_u;
+        VkSampler textureSampler_v;
+        VkBuffer yuvBuffer_y;
+        VkBuffer yuvBuffer_u;
+        VkBuffer yuvBuffer_v;
+        VkDeviceMemory yuvBufferMemory_y;
+        VkDeviceMemory yuvBufferMemory_u;
+        VkDeviceMemory yuvBufferMemory_v;
+        void* yuvBufferMemoryMapped_y{nullptr};
+        void* yuvBufferMemoryMapped_u{nullptr};
+        void* yuvBufferMemoryMapped_v{nullptr};
+
+        PipelineScreenLayout() = default;
+
+        ~PipelineScreenLayout() {
+            if (m_vkDevice != nullptr) {                
+                vkDestroyBuffer(m_vkDevice, yuvBuffer_y, nullptr);
+                vkDestroyBuffer(m_vkDevice, yuvBuffer_u, nullptr);
+                vkDestroyBuffer(m_vkDevice, yuvBuffer_v, nullptr);
+                vkFreeMemory(m_vkDevice, textureImageMemory_y, nullptr);
+                vkFreeMemory(m_vkDevice, textureImageMemory_u, nullptr);
+                vkFreeMemory(m_vkDevice, textureImageMemory_v, nullptr);
+                vkDestroyImage(m_vkDevice, textureImage_y, nullptr);
+                vkDestroyImage(m_vkDevice, textureImage_u, nullptr);
+                vkDestroyImage(m_vkDevice, textureImage_v, nullptr);
+                vkDestroySampler(m_vkDevice, textureSampler_y, nullptr);
+                vkDestroySampler(m_vkDevice, textureSampler_u, nullptr);
+                vkDestroySampler(m_vkDevice, textureSampler_v, nullptr);
+                vkFreeMemory(m_vkDevice, yuvBufferMemory_y, nullptr);
+                vkFreeMemory(m_vkDevice, yuvBufferMemory_u, nullptr);
+                vkFreeMemory(m_vkDevice, yuvBufferMemory_v, nullptr);
+                vkDestroySampler(m_vkDevice, textureSampler_y, nullptr);
+                vkDestroySampler(m_vkDevice, textureSampler_u, nullptr);
+                vkDestroySampler(m_vkDevice, textureSampler_v, nullptr);
+            }
+            m_vkDevice = nullptr;
+        }
+
+        void Create(VkDevice device, MemoryAllocator* memAllocator, VkPhysicalDevice physicalDevice, int32_t videoWidth, int32_t videoHeight, VkDescriptorSetLayout descriptorSetLayout) {
+            m_vkDevice = device;
+            m_memAllocator = memAllocator;
+            vkPhysicalDevice = physicalDevice;
+
+            CreateUniformBuffer();
+            CreateDescriptorPool();           
+            
+            CreateTextureImage(videoWidth, videoHeight);
+            CreateTextureSampler();
+            CreateDescriptorSets(descriptorSetLayout);
+        }
+
+        PipelineScreenLayout(const PipelineScreenLayout&) = delete;
+        PipelineScreenLayout& operator=(const PipelineScreenLayout&) = delete;
+        PipelineScreenLayout(PipelineScreenLayout&&) = delete;
+        PipelineScreenLayout& operator=(PipelineScreenLayout&&) = delete;
+
+        void CreateUniformBuffer() {
+            VkDeviceSize bufferSize = sizeof(XrMatrix4x4f); //mvp
+            VkBufferCreateInfo bufferInfo{};
+            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bufferInfo.size = bufferSize;
+            bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            CHECK_VKCMD(vkCreateBuffer(m_vkDevice, &bufferInfo, nullptr, &uniformBuffer));
+
+            VkMemoryRequirements memRequirements;
+            vkGetBufferMemoryRequirements(m_vkDevice, uniformBuffer, &memRequirements);
+            m_memAllocator->Allocate(memRequirements, &uniformBufferMemory);
+            vkBindBufferMemory(m_vkDevice, uniformBuffer, uniformBufferMemory, 0);
+            vkMapMemory(m_vkDevice, uniformBufferMemory, 0, bufferSize, 0, &uniformBufferMapped);
+        }
+
+        void CreateDescriptorPool() {
+            std::array<VkDescriptorPoolSize, 2> poolSizes{};
+            poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            poolSizes[0].descriptorCount = 1;
+            poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            poolSizes[1].descriptorCount = 3;
+
+            VkDescriptorPoolCreateInfo poolInfo{};
+            poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+            poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+            poolInfo.pPoolSizes = poolSizes.data();
+            poolInfo.maxSets = 1;
+            CHECK_VKCMD(vkCreateDescriptorPool(m_vkDevice, &poolInfo, nullptr, &descriptorPool));
+        }
+
+        void CreateTextureImage(uint32_t width, uint32_t height) {
+            m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_y, yuvBufferMemory_y);
+            m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_u, yuvBufferMemory_u);
+            m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_v, yuvBufferMemory_v);
+            vkMapMemory(m_vkDevice, yuvBufferMemory_y, 0, width * height, 0, &yuvBufferMemoryMapped_y);
+            vkMapMemory(m_vkDevice, yuvBufferMemory_u, 0, width * height , 0, &yuvBufferMemoryMapped_u);
+            vkMapMemory(m_vkDevice, yuvBufferMemory_v, 0, width * height , 0, &yuvBufferMemoryMapped_v);
+
+            createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_y, textureImageMemory_y);
+            createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_u, textureImageMemory_u);
+            createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_v, textureImageMemory_v);
+
+            textureImageView_y = createImageView(textureImage_y, g_imageFormat);
+            textureImageView_u = createImageView(textureImage_u, g_imageFormat);
+            textureImageView_v = createImageView(textureImage_v, g_imageFormat);
+        }
+
+        void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+            VkImageCreateInfo imageInfo{};
+            imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            imageInfo.imageType = VK_IMAGE_TYPE_2D;
+            imageInfo.extent.width = width;
+            imageInfo.extent.height = height;
+            imageInfo.extent.depth = 1;
+            imageInfo.mipLevels = 1;
+            imageInfo.arrayLayers = 1;
+            imageInfo.format = format;
+            imageInfo.tiling = tiling;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            imageInfo.usage = usage;
+            imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+            imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            CHECK_VKCMD(vkCreateImage(m_vkDevice, &imageInfo, nullptr, &image));
+
+            VkMemoryRequirements memRequirements;
+            vkGetImageMemoryRequirements(m_vkDevice, image, &memRequirements);
+            m_memAllocator->Allocate(memRequirements, &imageMemory, properties);
+            vkBindImageMemory(m_vkDevice, image, imageMemory, 0);
+        }
+
+        VkImageView createImageView(VkImage image, VkFormat format) {
+            VkImageViewCreateInfo viewInfo{};
+            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image = image;
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format = format;
+            viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.baseMipLevel = 0;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.baseArrayLayer = 0;
+            viewInfo.subresourceRange.layerCount = 1;
+            VkImageView imageView;
+            CHECK_VKCMD(vkCreateImageView(m_vkDevice, &viewInfo, nullptr, &imageView));
+            return imageView;
+        }
+
+        void CreateTextureSampler() {
+            VkSamplerCreateInfo samplerInfo{};
+            samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            samplerInfo.pNext = nullptr;
+            samplerInfo.magFilter = VK_FILTER_LINEAR;
+            samplerInfo.minFilter = VK_FILTER_LINEAR;
+            samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            samplerInfo.mipLodBias = 0.0f;
+            samplerInfo.anisotropyEnable = VK_TRUE;
+            samplerInfo.maxAnisotropy = 1;
+            samplerInfo.compareEnable = VK_FALSE;
+            samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+            samplerInfo.minLod = 0.0f;
+            samplerInfo.maxLod = 1.0f;
+            samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+            samplerInfo.unnormalizedCoordinates = VK_FALSE;
+            CHECK_VKCMD(vkCreateSampler(m_vkDevice, &samplerInfo, nullptr, &textureSampler_y));
+            CHECK_VKCMD(vkCreateSampler(m_vkDevice, &samplerInfo, nullptr, &textureSampler_u));
+            CHECK_VKCMD(vkCreateSampler(m_vkDevice, &samplerInfo, nullptr, &textureSampler_v));
+        }
+
+        void CreateDescriptorSets(VkDescriptorSetLayout descriptorSetLayout) {
+            std::vector<VkDescriptorSetLayout> layouts{1, descriptorSetLayout};
+            VkDescriptorSetAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorPool = descriptorPool;
+            allocInfo.descriptorSetCount = 1;
+            allocInfo.pSetLayouts = layouts.data();
+            CHECK_VKCMD(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &descriptorSets));
+
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = uniformBuffer;
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(XrMatrix4x4f);  //mvp
+
+            VkDescriptorImageInfo imageInfo_y{};
+            imageInfo_y.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo_y.imageView = textureImageView_y;
+            imageInfo_y.sampler = textureSampler_y;
+
+            VkDescriptorImageInfo imageInfo_u{};
+            imageInfo_u.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo_u.imageView = textureImageView_u;
+            imageInfo_u.sampler = textureSampler_u;
+
+            VkDescriptorImageInfo imageInfo_v{};
+            imageInfo_v.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo_v.imageView = textureImageView_v;
+            imageInfo_v.sampler = textureSampler_v;
+
+            std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = descriptorSets;
+            descriptorWrites[0].dstBinding = 0;
+            descriptorWrites[0].dstArrayElement = 0;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[1].dstSet = descriptorSets;
+            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstArrayElement = 0;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].pImageInfo = &imageInfo_y;
+
+            descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[2].dstSet = descriptorSets;
+            descriptorWrites[2].dstBinding = 2;
+            descriptorWrites[2].dstArrayElement = 0;
+            descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[2].descriptorCount = 1;
+            descriptorWrites[2].pImageInfo = &imageInfo_u;
+
+            descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[3].dstSet = descriptorSets;
+            descriptorWrites[3].dstBinding = 3;
+            descriptorWrites[3].dstArrayElement = 0;
+            descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[3].descriptorCount = 1;
+            descriptorWrites[3].pImageInfo = &imageInfo_v;
+
+            vkUpdateDescriptorSets(m_vkDevice, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+        }
+
+
+    private:
+        VkDevice m_vkDevice{VK_NULL_HANDLE};
+        MemoryAllocator* m_memAllocator{nullptr};
+    };
 // Simple vertex MVP xform & color fragment shader layout
 struct PipelineLayout {
     VkPipelineLayout layout{VK_NULL_HANDLE};
     VkDescriptorSetLayout descriptorSetLayout{VK_NULL_HANDLE};
-    VkDescriptorPool descriptorPool;
-    VkDescriptorSet descriptorSets;
-    VkBuffer uniformBuffer;
-    VkDeviceMemory uniformBufferMemory;
-    void* uniformBufferMapped{nullptr};
-    VkPhysicalDevice vkPhysicalDevice{VK_NULL_HANDLE};
-    VkImage textureImage_y;
-    VkImage textureImage_u;
-    VkImage textureImage_v;
-    VkImageView textureImageView_y;
-    VkImageView textureImageView_u;
-    VkImageView textureImageView_v;
-    VkDeviceMemory textureImageMemory_y;
-    VkDeviceMemory textureImageMemory_u;
-    VkDeviceMemory textureImageMemory_v;
-    VkSampler textureSampler_y;
-    VkSampler textureSampler_u;
-    VkSampler textureSampler_v;
-    VkBuffer yuvBuffer_y;
-    VkBuffer yuvBuffer_u;
-    VkBuffer yuvBuffer_v;
-    VkDeviceMemory yuvBufferMemory_y;
-    VkDeviceMemory yuvBufferMemory_u;
-    VkDeviceMemory yuvBufferMemory_v;
-    void* yuvBufferMemoryMapped_y{nullptr};
-    void* yuvBufferMemoryMapped_u{nullptr};
-    void* yuvBufferMemoryMapped_v{nullptr};
+    
 
     PipelineLayout() = default;
 
@@ -794,38 +1025,15 @@ struct PipelineLayout {
             }
             if (descriptorSetLayout != VK_NULL_HANDLE) {
                 vkDestroyDescriptorSetLayout(m_vkDevice, descriptorSetLayout, nullptr);
-            }
-            vkDestroyBuffer(m_vkDevice, yuvBuffer_y, nullptr);
-            vkDestroyBuffer(m_vkDevice, yuvBuffer_u, nullptr);
-            vkDestroyBuffer(m_vkDevice, yuvBuffer_v, nullptr);
-            vkFreeMemory(m_vkDevice, textureImageMemory_y, nullptr);
-            vkFreeMemory(m_vkDevice, textureImageMemory_u, nullptr);
-            vkFreeMemory(m_vkDevice, textureImageMemory_v, nullptr);
-            vkDestroyImage(m_vkDevice, textureImage_y, nullptr);
-            vkDestroyImage(m_vkDevice, textureImage_u, nullptr);
-            vkDestroyImage(m_vkDevice, textureImage_v, nullptr);
-            vkDestroySampler(m_vkDevice, textureSampler_y, nullptr);
-            vkDestroySampler(m_vkDevice, textureSampler_u, nullptr);
-            vkDestroySampler(m_vkDevice, textureSampler_v, nullptr);
-            vkFreeMemory(m_vkDevice, yuvBufferMemory_y, nullptr);
-            vkFreeMemory(m_vkDevice, yuvBufferMemory_u, nullptr);
-            vkFreeMemory(m_vkDevice, yuvBufferMemory_v, nullptr);
-            vkDestroySampler(m_vkDevice, textureSampler_y, nullptr);
-            vkDestroySampler(m_vkDevice, textureSampler_u, nullptr);
-            vkDestroySampler(m_vkDevice, textureSampler_v, nullptr);
+            }            
         }
         descriptorSetLayout = VK_NULL_HANDLE;
         layout = VK_NULL_HANDLE;
         m_vkDevice = nullptr;
     }
 
-    void Create(VkDevice device, MemoryAllocator* memAllocator, VkPhysicalDevice physicalDevice, int32_t videoWidth, int32_t videoHeight) {
-        m_vkDevice = device;
-        m_memAllocator = memAllocator;
-        vkPhysicalDevice = physicalDevice;
-
-        CreateUniformBuffer();
-        CreateDescriptorPool();
+    void Create(VkDevice device) {
+        m_vkDevice = device;        
 
         VkDescriptorSetLayoutBinding uboLayoutBinding{};
         uboLayoutBinding.binding = 0;
@@ -869,197 +1077,15 @@ struct PipelineLayout {
         pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
         CHECK_VKCMD(
                 vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &layout));
-
-        CreateTextureImage(videoWidth, videoHeight);
-        CreateTextureSampler();
-        CreateDescriptorSets();
     }    
 
     PipelineLayout(const PipelineLayout&) = delete;
     PipelineLayout& operator=(const PipelineLayout&) = delete;
     PipelineLayout(PipelineLayout&&) = delete;
-    PipelineLayout& operator=(PipelineLayout&&) = delete;
-
-    void CreateUniformBuffer() {
-        VkDeviceSize bufferSize = sizeof(XrMatrix4x4f); //mvp
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        CHECK_VKCMD(vkCreateBuffer(m_vkDevice, &bufferInfo, nullptr, &uniformBuffer));
-
-        VkMemoryRequirements memRequirements;
-        vkGetBufferMemoryRequirements(m_vkDevice, uniformBuffer, &memRequirements);
-        m_memAllocator->Allocate(memRequirements, &uniformBufferMemory);
-        vkBindBufferMemory(m_vkDevice, uniformBuffer, uniformBufferMemory, 0);
-        vkMapMemory(m_vkDevice, uniformBufferMemory, 0, bufferSize, 0, &uniformBufferMapped);
-    }
-
-    void CreateDescriptorPool() {
-        std::array<VkDescriptorPoolSize, 2> poolSizes{};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = 1;
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = 3;
-
-        VkDescriptorPoolCreateInfo poolInfo{};
-        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-        poolInfo.pPoolSizes = poolSizes.data();
-        poolInfo.maxSets = 1;
-        CHECK_VKCMD(vkCreateDescriptorPool(m_vkDevice, &poolInfo, nullptr, &descriptorPool));
-    }
-
-    void CreateTextureImage(uint32_t width, uint32_t height) {
-        m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_y, yuvBufferMemory_y);
-        m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_u, yuvBufferMemory_u);
-        m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_v, yuvBufferMemory_v);
-        vkMapMemory(m_vkDevice, yuvBufferMemory_y, 0, width * height, 0, &yuvBufferMemoryMapped_y);
-        vkMapMemory(m_vkDevice, yuvBufferMemory_u, 0, width * height , 0, &yuvBufferMemoryMapped_u);
-        vkMapMemory(m_vkDevice, yuvBufferMemory_v, 0, width * height , 0, &yuvBufferMemoryMapped_v);
-
-        createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_y, textureImageMemory_y);
-        createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_u, textureImageMemory_u);
-        createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_v, textureImageMemory_v);
-
-        textureImageView_y = createImageView(textureImage_y, g_imageFormat);
-        textureImageView_u = createImageView(textureImage_u, g_imageFormat);
-        textureImageView_v = createImageView(textureImage_v, g_imageFormat);
-    }
-
-    void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.extent.width = width;
-        imageInfo.extent.height = height;
-        imageInfo.extent.depth = 1;
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.format = format;
-        imageInfo.tiling = tiling;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = usage;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        CHECK_VKCMD(vkCreateImage(m_vkDevice, &imageInfo, nullptr, &image));
-
-        VkMemoryRequirements memRequirements;
-        vkGetImageMemoryRequirements(m_vkDevice, image, &memRequirements);
-        m_memAllocator->Allocate(memRequirements, &imageMemory, properties);
-        vkBindImageMemory(m_vkDevice, image, imageMemory, 0);
-    }
-
-    VkImageView createImageView(VkImage image, VkFormat format) {
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = format;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
-        VkImageView imageView;
-        CHECK_VKCMD(vkCreateImageView(m_vkDevice, &viewInfo, nullptr, &imageView));
-        return imageView;
-    }
-
-    void CreateTextureSampler() {
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.pNext = nullptr;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.mipLodBias = 0.0f;
-        samplerInfo.anisotropyEnable = VK_TRUE;
-        samplerInfo.maxAnisotropy = 1;
-        samplerInfo.compareEnable = VK_FALSE;
-        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 1.0f;
-        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        samplerInfo.unnormalizedCoordinates = VK_FALSE;
-        CHECK_VKCMD(vkCreateSampler(m_vkDevice, &samplerInfo, nullptr, &textureSampler_y));
-        CHECK_VKCMD(vkCreateSampler(m_vkDevice, &samplerInfo, nullptr, &textureSampler_u));
-        CHECK_VKCMD(vkCreateSampler(m_vkDevice, &samplerInfo, nullptr, &textureSampler_v));
-    }
-
-    void CreateDescriptorSets() {
-        std::vector<VkDescriptorSetLayout> layouts{1, descriptorSetLayout};
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = layouts.data();
-        CHECK_VKCMD(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &descriptorSets));
-
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffer;
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(XrMatrix4x4f);  //mvp
-
-        VkDescriptorImageInfo imageInfo_y{};
-        imageInfo_y.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo_y.imageView = textureImageView_y;
-        imageInfo_y.sampler = textureSampler_y;
-
-        VkDescriptorImageInfo imageInfo_u{};
-        imageInfo_u.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo_u.imageView = textureImageView_u;
-        imageInfo_u.sampler = textureSampler_u;
-
-        VkDescriptorImageInfo imageInfo_v{};
-        imageInfo_v.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo_v.imageView = textureImageView_v;
-        imageInfo_v.sampler = textureSampler_v;
-
-        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].dstSet = descriptorSets;
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pBufferInfo = &bufferInfo;
-
-        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[1].dstSet = descriptorSets;
-        descriptorWrites[1].dstBinding = 1;
-        descriptorWrites[1].dstArrayElement = 0;
-        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pImageInfo = &imageInfo_y;
-
-        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[2].dstSet = descriptorSets;
-        descriptorWrites[2].dstBinding = 2;
-        descriptorWrites[2].dstArrayElement = 0;
-        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[2].descriptorCount = 1;
-        descriptorWrites[2].pImageInfo = &imageInfo_u;
-
-        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[3].dstSet = descriptorSets;
-        descriptorWrites[3].dstBinding = 3;
-        descriptorWrites[3].dstArrayElement = 0;
-        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[3].descriptorCount = 1;
-        descriptorWrites[3].pImageInfo = &imageInfo_v;
-
-        vkUpdateDescriptorSets(m_vkDevice, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
-    }
-    
+    PipelineLayout& operator=(PipelineLayout&&) = delete;    
 
    private:
     VkDevice m_vkDevice{VK_NULL_HANDLE};
-    MemoryAllocator* m_memAllocator{nullptr};
 };
 
 // Pipeline wrapper for rendering pipeline state
@@ -1393,7 +1419,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         return nullptr;
     }
 
-    void InitializeDevice(XrInstance instance, XrSystemId systemId) override {
+    void InitializeDevice(XrInstance instance, XrSystemId systemId, const std::vector<quest_teleop::StreamConfig>& streamConfigVec) override {
         // Create the Vulkan device for the adapter associated with the system.
         // Extension function must be loaded by name
         XrGraphicsRequirementsVulkan2KHR graphicsRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN2_KHR};
@@ -1530,7 +1556,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
         m_memAllocator.Init(m_vkPhysicalDevice, m_vkDevice);
 
-        InitializeResources();
+        InitializeResources(streamConfigVec);
 
         m_graphicsBinding.instance = m_vkInstance;
         m_graphicsBinding.physicalDevice = m_vkPhysicalDevice;
@@ -1539,7 +1565,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         m_graphicsBinding.queueIndex = 0;
     }
 
-    void InitializeResources() {
+    void InitializeResources(const std::vector<quest_teleop::StreamConfig>& streamConfigVec) {
 
         std::vector<uint32_t> vertexSPIRV = SPV_PREFIX
 #include "vulkan_shaders/vert.spv"
@@ -1561,21 +1587,29 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         CHECK_VKCMD(m_namer.SetName(VK_OBJECT_TYPE_SEMAPHORE, (uint64_t)m_vkDrawDone, "hello_xr draw done semaphore"));
 
         if (!m_cmdBuffer.Init(m_namer, m_vkDevice, m_queueFamilyIndex, m_vkQueue)) THROW("Failed to create command buffer");
+     
+        m_pipelineLayout.Create(m_vkDevice);   
+        
+        for (const auto& streamConfig : streamConfigVec) {
+            m_pipelineScreenLayouts[streamConfig.name] = std::make_unique<PipelineScreenLayout>();
 
-        m_pipelineLayout.Create(m_vkDevice, &m_memAllocator, m_vkPhysicalDevice, 1920, 1080);
-
+            m_pipelineScreenLayouts[streamConfig.name]->Create(m_vkDevice, &m_memAllocator,
+                                                               m_vkPhysicalDevice,
+                                                               streamConfig.width,
+                                                               streamConfig.height, m_pipelineLayout.descriptorSetLayout);
+        }
+        
         static_assert(sizeof(Vertex) == 20, "Unexpected Vertex size");
         m_drawBuffer.Init(m_vkDevice, &m_memAllocator,
                           {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, Position)},
-                           {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, TexCoord)}});
-        
-        m_scale = {1.920 * 2, 1.080 * 2, 1.0};
+                           {1, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(Vertex, TexCoord)}});
+
+        m_scale = {1.920, 1.080, 1.0};
         m_pose = Translation({0.f, 0.f, m_disdance});
-        
+
         m_drawBuffer.Create(s_indices.size(), s_vertexCoordData.size());
         m_drawBuffer.UpdateVertices(s_vertexCoordData.data(), s_vertexCoordData.size(), 0);
         m_drawBuffer.UpdateIndices(s_indices.data(), s_indices.size(), 0);
-
     }
 
     int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& runtimeFormats) const override {
@@ -1617,13 +1651,11 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     }
 
     void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-                    int64_t /*swapchainFormat*/, const std::vector<cv::Mat>& mono_images, const std::vector<cv::Mat>& stereo_images) override {
+                    int64_t /*swapchainFormat*/, const std::map<std::string, cv::Mat>& mono_images, const std::map<std::string, cv::Mat>& stereo_images) override {
         CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
 
         auto swapchainContext = m_swapchainImageContextMap[swapchainImage];
         uint32_t imageIndex = swapchainContext->ImageIndex(swapchainImage);
-
-        
 
         // XXX Should double-buffer the command buffers, for now just flush
         m_cmdBuffer.Wait();
@@ -1632,7 +1664,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
         // Ensure depth is in the right layout
         swapchainContext->depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-        
+
         // Bind and clear eye render target
         static std::array<VkClearValue, 2> clearValues;
         clearValues[0].color.float32[0] = m_clearColor[0];
@@ -1655,12 +1687,20 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
+
         
-        Log::Write(Log::Level::Info, Fmt("RenderView: mono_images.size() = %d, stereo_images.size() = %d", mono_images.size(), stereo_images.size()));
-        auto copy = mono_images;
-        copy.insert(mono_images.end(), stereo_images.begin(), stereo_images.end());
-        for (auto& image: copy) {
-            Log::Write(Log::Level::Info, Fmt("RenderView: Starting copy   cols = %d, rows = %d", image.cols, image.rows));
+ 
+
+        Log::Write(Log::Level::Info, Fmt("RenderView: mono_images.size() = %d, stereo_images.size() = %d, copy %d", mono_images.size(), stereo_images.size(), copy.size()));
+        for (auto& pair: mono_images) {
+            const cv::Mat& image = pair.second;
+            if (image.empty()) {
+                Log::Write(Log::Level::Error, "RenderView: Empty image");
+                continue;
+            } else {
+                Log::Write(Log::Level::Info, Fmt("RenderView: Starting copy   cols = %d, rows = %d", image.cols, image.rows));
+            }
+            
             std::vector<cv::Mat> images;
 
             cv::split(image, images);
@@ -1754,6 +1794,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     ShaderProgram m_shaderProgram{};
     CmdBuffer m_cmdBuffer{};
     PipelineLayout m_pipelineLayout{};
+    std::map<std::string, std::unique_ptr<PipelineScreenLayout>> m_pipelineScreenLayouts;
     VertexBuffer<Vertex> m_drawBuffer{};
     std::array<float, 4> m_clearColor;
 
@@ -1957,11 +1998,11 @@ struct VulkanGraphicsPluginLegacy : public VulkanGraphicsPlugin {
                                           reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanDeviceExtensionsKHR)));
 
         uint32_t deviceExtensionNamesSize = 0;
-        CHECK_XRCMD(pfnGetVulkanDeviceExtensionsKHR(instance, createInfo->systemId, 0, &deviceExtensionNamesSize, nullptr));
+        CHECK_XRCMD(pfnGetVulkanDeviceExtensionsKHR(instance, createInfo->systemId, 0, &deviceExtensionNamesSize, nullptr))
         std::vector<char> deviceExtensionNames(deviceExtensionNamesSize);
         if (deviceExtensionNamesSize > 0) {
             CHECK_XRCMD(pfnGetVulkanDeviceExtensionsKHR(instance, createInfo->systemId, deviceExtensionNamesSize,
-                                                        &deviceExtensionNamesSize, &deviceExtensionNames[0]));
+                                                        &deviceExtensionNamesSize, &deviceExtensionNames[0]))
         }
         {
             // Note: This cannot outlive the extensionNames above, since it's just a collection of views into that string!
@@ -2045,3 +2086,5 @@ std::shared_ptr<IGraphicsPlugin> CreateGraphicsPlugin_VulkanLegacy(const std::sh
 }
 
 #endif  // XR_USE_GRAPHICS_API_VULKAN
+
+#pragma clang diagnostic pop
