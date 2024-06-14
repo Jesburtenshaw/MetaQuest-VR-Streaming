@@ -122,8 +122,71 @@ namespace {
                                          XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
             // Read JSON config file
             using json = nlohmann::json;
-            std::ifstream f("assets/config/config.json");            
-            auto streams = json::parse(f);
+            std::string json_string = R"(
+                        {
+               "streams":{
+                  "main":{
+                     "type":"stereo",
+                     "left_port":62000,
+                     "right_port":62001,
+                     "width":1920,
+                     "height":1080,
+                     "fps":30,
+                     "codec":"h264",
+                     "position":{
+                        "scale":1.0,
+                        "r":1.5,
+                        "theta":2.0,
+                        "phi":0.0
+                     }
+                  },
+                  "left":{
+                     "type":"mono",
+                     "port":62002,
+                     "width":1920,
+                     "height":1080,
+                     "fps":30,
+                     "codec":"h264",
+                     "position":{
+                        "scale":1.0,
+                        "r":1.5,
+                        "theta":2.0,
+                        "phi":0.0
+                     }
+                  },
+                  "right":{
+                     "type":"mono",
+                     "port":62003,
+                     "width":1920,
+                     "height":1080,
+                     "fps":30,
+                     "codec":"h264",
+                     "position":{
+                        "scale":1.0,
+                        "r":1.5,
+                        "theta":2.0,
+                        "phi":0.0
+                     }
+                  },
+                  "left_grip":{
+                     "type":"mono",
+                     "port":62004,
+                     "width":1280,
+                     "height":720,
+                     "fps":30,
+                     "codec":"h264",
+                     "position":{
+                        "scale":1.0,
+                        "r":1.5,
+                        "theta":2.0,
+                        "phi":0.0
+                     }
+                  }
+               }
+            }
+            )";
+
+            auto streams = json::parse(json_string);
             Log::Write(Log::Level::Warning, "All initialized!");
 
             for (auto it = streams["streams"].begin(); it != streams["streams"].end(); ++it) {
@@ -1153,22 +1216,24 @@ namespace {
 //            }
 
             std::vector<cv::Mat> mono_images;
-            std::vector<cv::Mat> left_images;
-            std::vector<cv::Mat> right_images;
+            std::vector<cv::Mat> stereo_images[2];            
             for (auto i = 0; i < m_pipelines.size(); i++) {
+                Log::Write(Log::Level::Info, Fmt("Getting image from pipeline: %s, %d", m_pipelines[i]->GetPipelineName().c_str(), m_pipelines[i]->GetPipelineType()));
                 if (m_pipelines[i]->GetPipelineType() == StreamType::Mono) {
                     mono_images.push_back(m_pipelines[i]->GetImage());
                 } else {
                     if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Left)
-                        left_images.push_back(m_pipelines[i]->GetImage());
+                        stereo_images[static_cast<int>(PipelineSide::Left)].push_back(m_pipelines[i]->GetImage());
                     else if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Right)
-                        right_images.push_back(m_pipelines[i]->GetImage());
+                        stereo_images[static_cast<int>(PipelineSide::Right)].push_back(m_pipelines[i]->GetImage());
                     else { // m_pipelines[i]->GetPipelineSide() == PipelineSide::Both
-                        left_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Left));
-                        right_images.push_back(m_pipelines[i]->GetImage(PipelineSide::Right));
+                        stereo_images[static_cast<int>(PipelineSide::Left)].push_back(m_pipelines[i]->GetImage(PipelineSide::Left));
+                        stereo_images[static_cast<int>(PipelineSide::Right)].push_back(m_pipelines[i]->GetImage(PipelineSide::Right));
                     }
                 }
             }
+
+            Log::Write(Log::Level::Info, "[RENDERING]Finished getting images");
             // Render view to the appropriate part of the swapchain image.
             for (uint32_t i = 0; i < viewCountOutput; i++) {
                 // Each view has a separate swapchain which is acquired, rendered to, and released.
@@ -1196,7 +1261,7 @@ namespace {
 
                 const XrSwapchainImageBaseHeader *const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
                 m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage,
-                                             m_colorSwapchainFormat, mono_images, i == 0? left_images:right_images);
+                                             m_colorSwapchainFormat, mono_images, stereo_images[i]);
 
                 XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
                 CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));

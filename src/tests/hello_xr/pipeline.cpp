@@ -410,6 +410,7 @@ namespace quest_teleop {
     }
 
     cv::Mat &Pipeline::GetImage(PipelineSide side) {
+        Log::Write(Log::Level::Info,m_streamConfig.name + " Getting image");
         if (m_streamConfig.side != PipelineSide::Both) {
             side = m_streamConfig.side;
         }
@@ -423,11 +424,11 @@ namespace quest_teleop {
                                    cv::Scalar(0, 0, 200));
             sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
                                       cv::Scalar(0, 0, 200));
-            cv::putText(sample.images[0], "[left]"+ m_streamConfig.name,
+            cv::putText(sample.images[static_cast<int>(PipelineSide::Left)], "[left]"+ m_streamConfig.name,
                         cv::Point(250, 250),
                         cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
                         cv::LINE_AA);
-            cv::putText(sample.images[0], "[right]"+ m_streamConfig.name,
+            cv::putText(sample.images[static_cast<int>(PipelineSide::Right)], "[right]"+ m_streamConfig.name,
                         cv::Point(250, 250),
                         cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
                         cv::LINE_AA);

@@ -32,8 +32,8 @@ namespace quest_teleop {
     };
     
     enum class PipelineSide {
-        Left,
-        Right,
+        Left=0,
+        Right=1,
         Both
     };
 
@@ -107,6 +107,26 @@ namespace quest_teleop {
         PipelineSide GetPipelineSide() const {
             return m_streamConfig.side;
         }
+        
+        CodecType GetPipelineCodec() const {
+            return m_streamConfig.codec;
+        }
+        
+        int GetPipelinePort() const {
+            return m_streamConfig.port;
+        }
+        
+        XrVector3f GetPipelinePosition() const {
+            return m_streamConfig.position;
+        }
+        
+        XrVector3f GetPipelineScale() const {
+            return m_streamConfig.scale;
+        }
+        
+        std::string GetPipelineName() const {
+            return m_streamConfig.name;
+        }    
 
     private:
         std::deque <SampleRead> m_samples;

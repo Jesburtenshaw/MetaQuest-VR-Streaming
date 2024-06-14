@@ -1655,10 +1655,12 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
-
+        
+        Log::Write(Log::Level::Info, Fmt("RenderView: mono_images.size() = %d, stereo_images.size() = %d", mono_images.size(), stereo_images.size()));
         auto copy = mono_images;
         copy.insert(mono_images.end(), stereo_images.begin(), stereo_images.end());
         for (auto& image: copy) {
+            Log::Write(Log::Level::Info, Fmt("RenderView: Starting copy   cols = %d, rows = %d", image.cols, image.rows));
             std::vector<cv::Mat> images;
 
             cv::split(image, images);
@@ -1705,6 +1707,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                                     0, nullptr);
             vkCmdDrawIndexed(m_cmdBuffer.buf, m_drawBuffer.count.idx, 1, 0, 0, 0);
         }
+        Log::Write(Log::Level::Info, "RenderView: End copying");
         vkCmdEndRenderPass(m_cmdBuffer.buf);
         m_cmdBuffer.End();
         m_cmdBuffer.Exec(m_vkQueue);
