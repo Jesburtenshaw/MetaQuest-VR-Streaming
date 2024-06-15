@@ -129,61 +129,75 @@ namespace {
                "streams":{
                   "main":{
                      "type":"stereo",
-                     "left_port":62000,
-                     "right_port":62001,
-                     "width":1920,
-                     "height":1080,
+                     "left_port":5004,
+                     "right_port":5005,
+                     "width":480,
+                     "height":270,
                      "fps":30,
                      "codec":"h264",
                      "position":{
-                        "scale":1.0,
-                        "r":1.5,
-                        "theta":2.0,
+                        "scale":1,
+                        "r":10.0,
+                        "theta":0.0,
                         "phi":0.0
                      }
                   },
                   "left":{
                      "type":"mono",
-                     "port":62002,
-                     "width":1920,
-                     "height":1080,
+                     "port":5006,
+                     "width":480,
+                     "height":270,
                      "fps":30,
                      "codec":"h264",
                      "position":{
-                        "scale":1.0,
-                        "r":1.5,
-                        "theta":2.0,
+                        "scale":1,
+                        "r":10.0,
+                        "theta":1.3,
                         "phi":0.0
                      }
                   },
                   "right":{
                      "type":"mono",
-                     "port":62003,
-                     "width":1920,
-                     "height":1080,
+                     "port":5007,
+                     "width":480,
+                     "height":270,
                      "fps":30,
                      "codec":"h264",
                      "position":{
-                        "scale":1.0,
-                        "r":1.5,
-                        "theta":2.0,
+                        "scale":1,
+                        "r":10.0,
+                        "theta":-1.3,
                         "phi":0.0
                      }
                   },
-                  "left_grip":{
+                    "top":{
                      "type":"mono",
-                     "port":62004,
-                     "width":1280,
-                     "height":720,
+                     "port":5008,
+                     "width":480,
+                     "height":270,
                      "fps":30,
                      "codec":"h264",
                      "position":{
-                        "scale":1.0,
-                        "r":1.5,
-                        "theta":2.0,
-                        "phi":0.0
+                        "scale":1,
+                        "r":10.0,
+                        "theta":0.0,
+                        "phi":1.3
                      }
-                  }
+                  },
+                  "bottom":{
+                     "type":"mono",
+                     "port":5009,
+                     "width":480,
+                     "height":270,
+                     "fps":30,
+                     "codec":"h264",
+                     "position":{
+                        "scale":1,
+                        "r":10.0,
+                        "theta":0.0,
+                        "phi":-1.3
+                     }
+                  }                  
                }
             }
             )";
@@ -198,9 +212,11 @@ namespace {
 
                 streamConfig.type = stream["type"] == "mono" ? StreamType::Mono : StreamType::Stereo;
                 streamConfig.position = {stream["position"]["r"], stream["position"]["theta"], stream["position"]["phi"]};
-                streamConfig.scale = {stream["position"]["scale"], stream["position"]["scale"], stream["position"]["scale"]};
                 streamConfig.width = stream["width"];
                 streamConfig.height = stream["height"];
+                float scale = stream["position"]["scale"];
+                streamConfig.scale = {scale * streamConfig.width / 1000, scale * streamConfig.height / 1000, scale};
+                
                 streamConfig.codec = stream["codec"] == "h264" ? CodecType::H264 : stream["codec"] == "h265" ? CodecType::H265 : CodecType::AV1;
                 streamConfig.side = (streamConfig.type ==  StreamType::Stereo)?PipelineSide::Both:PipelineSide::Left;
 #ifndef USE_STEREO_SIDE_BY_SIDE

@@ -323,10 +323,10 @@ namespace quest_teleop {
                                "variable set for more details.");
                 }
                 for (int i = 0; i < 2; ++i) {
-                    sampleRead.images[i] = cv::Mat(cv::Size(1680, 1760), CV_8UC3,
+                    sampleRead.images[i] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
                                                    cv::Scalar(255, 255, 0));
                     cv::putText(sampleRead.images[i], "Error or End Video",
-                                cv::Point(1680 / 2, 1760 / 2),
+                                cv::Point(m_streamConfig.width/2, m_streamConfig.height/2),
                                 cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
                                 cv::LINE_AA);
                 }
@@ -391,15 +391,15 @@ namespace quest_teleop {
                 }
 
                 if (!sampleRead.sample || !sampleRead.buffer || !sampleRead.mapped) {
-                    sampleRead.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
+                    sampleRead.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
                                                cv::Scalar(0, 0, 200));
-                    sampleRead.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
+                    sampleRead.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
                                                    cv::Scalar(0, 0, 200));
-                    cv::putText(sampleRead.images[0], "[left]"+ m_streamConfig.name,
+                    cv::putText(sampleRead.images[static_cast<int>(PipelineSide::Left)], "[left]"+ m_streamConfig.name,
                                 cv::Point(250, 250),
                                 cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
                                 cv::LINE_AA);
-                    cv::putText(sampleRead.images[0], "[right]"+ m_streamConfig.name,
+                    cv::putText(sampleRead.images[static_cast<int>(PipelineSide::Right)], "[right]"+ m_streamConfig.name,
                                 cv::Point(250, 250),
                                 cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
                                 cv::LINE_AA);
@@ -420,9 +420,9 @@ namespace quest_teleop {
         if (m_samples.size() <= 1) {
             m_samples.emplace_front();
             SampleRead &sample = m_samples.front();
-            sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
+            sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
                                    cv::Scalar(0, 0, 200));
-            sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(500, 500), CV_8UC3,
+            sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
                                       cv::Scalar(0, 0, 200));
             cv::putText(sample.images[static_cast<int>(PipelineSide::Left)], "[left]"+ m_streamConfig.name,
                         cv::Point(250, 250),

@@ -31,6 +31,7 @@
 #define SPV_SUFFIX
 #endif
 
+using namespace quest_teleop;
 namespace {
     
 
@@ -785,6 +786,10 @@ struct RenderTarget {
         void* yuvBufferMemoryMapped_u{nullptr};
         void* yuvBufferMemoryMapped_v{nullptr};
 
+        XrVector3f m_scale ;
+        XrPosef m_pose;
+        //float m_disdance;
+
         PipelineScreenLayout() = default;
 
         ~PipelineScreenLayout() {
@@ -811,15 +816,29 @@ struct RenderTarget {
             m_vkDevice = nullptr;
         }
 
-        void Create(VkDevice device, MemoryAllocator* memAllocator, VkPhysicalDevice physicalDevice, int32_t videoWidth, int32_t videoHeight, VkDescriptorSetLayout descriptorSetLayout) {
+        void Create(VkDevice device, MemoryAllocator* memAllocator, VkPhysicalDevice physicalDevice, const StreamConfig& streamConfig, VkDescriptorSetLayout descriptorSetLayout) {
             m_vkDevice = device;
             m_memAllocator = memAllocator;
             vkPhysicalDevice = physicalDevice;
-
+            
+            m_scale = streamConfig.scale;
+            //m_disdance = -streamConfig.position.x;
+            m_pose = Translation({  -m_scale.x * tan(streamConfig.position.y),m_scale.y * tan(streamConfig.position.z) , -m_scale.z * streamConfig.position.x});            
+            // orientation from alpha theta angles saved at position y and position z
+            auto yaw =  0.0f; // roll
+            auto pitch = streamConfig.position.y; // pitch
+            auto roll = streamConfig.position.z; // yaw
+            auto qx = sin(roll/2) * cos(pitch/2) * cos(yaw/2) - cos(roll/2) * sin(pitch/2) * sin(yaw/2);
+            auto qy = cos(roll/2) * sin(pitch/2) * cos(yaw/2) + sin(roll/2) * cos(pitch/2) * sin(yaw/2);
+            auto qz = cos(roll/2) * cos(pitch/2) * sin(yaw/2) - sin(roll/2) * sin(pitch/2) * cos(yaw/2);
+            auto qw = cos(roll/2) * cos(pitch/2) * cos(yaw/2) + sin(roll/2) * sin(pitch/2) * sin(yaw/2);
+            
+            //m_pose.orientation = {qx, qy, qz, qw};
+            
             CreateUniformBuffer();
             CreateDescriptorPool();           
             
-            CreateTextureImage(videoWidth, videoHeight);
+            CreateTextureImage(streamConfig.width, streamConfig.height);
             CreateTextureSampler();
             CreateDescriptorSets(descriptorSetLayout);
         }
@@ -1595,17 +1614,13 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
             m_pipelineScreenLayouts[streamConfig.name]->Create(m_vkDevice, &m_memAllocator,
                                                                m_vkPhysicalDevice,
-                                                               streamConfig.width,
-                                                               streamConfig.height, m_pipelineLayout.descriptorSetLayout);
+                                                               streamConfig, m_pipelineLayout.descriptorSetLayout);
         }
         
         static_assert(sizeof(Vertex) == 20, "Unexpected Vertex size");
         m_drawBuffer.Init(m_vkDevice, &m_memAllocator,
                           {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, Position)},
                            {1, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(Vertex, TexCoord)}});
-
-        m_scale = {1.920, 1.080, 1.0};
-        m_pose = Translation({0.f, 0.f, m_disdance});
 
         m_drawBuffer.Create(s_indices.size(), s_vertexCoordData.size());
         m_drawBuffer.UpdateVertices(s_vertexCoordData.data(), s_vertexCoordData.size(), 0);
@@ -1687,65 +1702,74 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
+        for (auto container: {mono_images, stereo_images}) {
+            for (auto &pair: container) {
+                const cv::Mat &image = pair.second;
+                if (image.empty()) {
+                    Log::Write(Log::Level::Error, "RenderView: Empty image");
+                    continue;
+                } else {
+                    Log::Write(Log::Level::Info,
+                               Fmt("RenderView: Starting copy   cols = %d, rows = %d", image.cols,
+                                   image.rows));
+                }
 
-        
- 
+                auto pipelineScreenLayout = m_pipelineScreenLayouts[pair.first].get();
 
-        Log::Write(Log::Level::Info, Fmt("RenderView: mono_images.size() = %d, stereo_images.size() = %d, copy %d", mono_images.size(), stereo_images.size(), copy.size()));
-        for (auto& pair: mono_images) {
-            const cv::Mat& image = pair.second;
-            if (image.empty()) {
-                Log::Write(Log::Level::Error, "RenderView: Empty image");
-                continue;
-            } else {
-                Log::Write(Log::Level::Info, Fmt("RenderView: Starting copy   cols = %d, rows = %d", image.cols, image.rows));
+                std::vector<cv::Mat> images;
+
+                cv::split(image, images);
+                // Compute the view-projection transform.
+                // Note all matrixes (including OpenXR's) are column-major, right-handed.
+                //pipelineScreenLayout->m_pose.position.z = pipelineScreenLayout->m_disdance;
+                const auto &pose = layerView.pose;
+                XrMatrix4x4f proj;
+                XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f,
+                                                 100.0f);
+                XrMatrix4x4f toView;
+                XrVector3f scale{1.f, 1.f, 1.f};
+                XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position,
+                                                            &pose.orientation,
+                                                            &scale);
+                XrMatrix4x4f view;
+                XrMatrix4x4f_InvertRigidBody(&view, &toView);
+                XrMatrix4x4f model;
+                XrMatrix4x4f_CreateTranslationRotationScale(&model,
+                                                            &pipelineScreenLayout->m_pose.position,
+                                                            &pipelineScreenLayout->m_pose.orientation,
+                                                            &pipelineScreenLayout->m_scale);
+                XrMatrix4x4f vp;
+                XrMatrix4x4f_Multiply(&vp, &proj, &view);
+
+                XrMatrix4x4f mvp;
+                XrMatrix4x4f_Multiply(&mvp, &vp, &model);
+
+                // update uniformBuffer
+                memcpy(pipelineScreenLayout->uniformBufferMapped, &mvp, sizeof(mvp));
+
+                uint32_t total_size = image.cols * image.rows;
+                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_y, images[0].data, total_size);
+                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_u, images[1].data, total_size);
+                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_v, images[2].data, total_size);
+
+                //copy image
+                copyBufferToImage(pipelineScreenLayout->yuvBuffer_y,
+                                  pipelineScreenLayout->textureImage_y,
+                                  image.cols, image.rows);
+                copyBufferToImage(pipelineScreenLayout->yuvBuffer_u,
+                                  pipelineScreenLayout->textureImage_u,
+                                  image.cols, image.rows);
+                copyBufferToImage(pipelineScreenLayout->yuvBuffer_v,
+                                  pipelineScreenLayout->textureImage_v,
+                                  image.cols, image.rows);
+
+                vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
+                vkCmdBindDescriptorSets(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        m_pipelineLayout.layout, 0, 1,
+                                        &pipelineScreenLayout->descriptorSets,
+                                        0, nullptr);
+                vkCmdDrawIndexed(m_cmdBuffer.buf, m_drawBuffer.count.idx, 1, 0, 0, 0);
             }
-            
-            std::vector<cv::Mat> images;
-
-            cv::split(image, images);
-            // Compute the view-projection transform.
-            // Note all matrixes (including OpenXR's) are column-major, right-handed.
-            m_pose.position.z = m_disdance;
-            const auto &pose = layerView.pose;
-            XrMatrix4x4f proj;
-            XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
-            XrMatrix4x4f toView;
-            XrVector3f scale{1.f, 1.f, 1.f};
-            XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation,
-                                                        &scale);
-            XrMatrix4x4f view;
-            XrMatrix4x4f_InvertRigidBody(&view, &toView);
-            XrMatrix4x4f model;
-            XrMatrix4x4f_CreateTranslationRotationScale(&model, &m_pose.position,
-                                                        &m_pose.orientation, &m_scale);
-            XrMatrix4x4f vp;
-            XrMatrix4x4f_Multiply(&vp, &proj, &view);
-
-            XrMatrix4x4f mvp;
-            XrMatrix4x4f_Multiply(&mvp, &vp, &model);
-
-            // update uniformBuffer
-            memcpy(m_pipelineLayout.uniformBufferMapped, &mvp, sizeof(mvp));
-
-            uint32_t total_size = image.cols * image.rows;
-            memcpy(m_pipelineLayout.yuvBufferMemoryMapped_y, images[0].data, total_size);
-            memcpy(m_pipelineLayout.yuvBufferMemoryMapped_u, images[1].data, total_size);
-            memcpy(m_pipelineLayout.yuvBufferMemoryMapped_v, images[2].data, total_size);
-
-            //copy image
-            copyBufferToImage(m_pipelineLayout.yuvBuffer_y, m_pipelineLayout.textureImage_y,
-                              image.cols, image.rows);
-            copyBufferToImage(m_pipelineLayout.yuvBuffer_u, m_pipelineLayout.textureImage_u,
-                              image.cols, image.rows);
-            copyBufferToImage(m_pipelineLayout.yuvBuffer_v, m_pipelineLayout.textureImage_v,
-                              image.cols, image.rows);
-
-            vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
-            vkCmdBindDescriptorSets(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    m_pipelineLayout.layout, 0, 1, &m_pipelineLayout.descriptorSets,
-                                    0, nullptr);
-            vkCmdDrawIndexed(m_cmdBuffer.buf, m_drawBuffer.count.idx, 1, 0, 0, 0);
         }
         Log::Write(Log::Level::Info, "RenderView: End copying");
         vkCmdEndRenderPass(m_cmdBuffer.buf);
@@ -1772,11 +1796,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
             m_cmdBuffer.endSingleTimeCommands(commandBuffer);
         }
-   protected:
-
-        XrPosef m_pose = Translation({0.f, 0.f, -0.2f});
-        XrVector3f m_scale{1.f, 1.f, 1.f};
-        float m_disdance = -0.2f;
+   protected:        
         
     XrGraphicsBindingVulkan2KHR m_graphicsBinding{XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR};
     std::list<SwapchainImageContext> m_swapchainImageContexts;
