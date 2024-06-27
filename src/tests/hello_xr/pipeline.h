@@ -16,9 +16,6 @@
 #include <memory>
 #include <vector>
 
-
-#include "nativelib/static_gstreamer.h"
-
 namespace quest_teleop {
     enum class StreamType {
         Mono,

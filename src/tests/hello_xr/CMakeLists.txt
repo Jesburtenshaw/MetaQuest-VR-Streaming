@@ -15,13 +15,28 @@
 # limitations under the License.
 #
 # Hint the path to the OpenCVConfig.cmake file
+set(GSTREAMER_VERSION 1.24) # 1.18 or 1.24
+
 if(ANDROID)
     set(OpenCV_DIR "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
-    set(GSTREAMER_ROOT_ANDROID "D:/Downloads/gstreamer-1.0-android-universal-1.24.3.tar/gstreamer-1.0-android-universal-1.24.3")
+    
+    set(GSTREAMER_1_24_ROOT "D:/Downloads/gstreamer-1_0-android-universal-1_24")
+    set(GSTREAMER_1_18_ROOT "D:/Downloads/gstreamer-1.0-android/gstreamer-1.0-android-universal-1.18.6")
 else () # case of Windows
     set(OpenCV_DIR "D:/opencv/opencv/build/install/OpenCV-android-sdk/sdk/native/jni")
     set(GSTREAMER_ROOT_ANDROID "D:/Downloads/gstreamer-1.0-android-universal-1.24.3.tar/gstreamer-1.0-android-universal-1.24.3")
 endif ()
+
+if (GSTREAMER_VERSION STREQUAL "1.18")
+    set(GSTREAMER_1_18 ON)
+    set(ENV{GSTREAMER_ROOT_ANDROID} "${GSTREAMER_1_18_ROOT}")
+elseif (GSTREAMER_VERSION STREQUAL "1.24")
+    set(GSTREAMER_1_24 ON)
+    set(ENV{GSTREAMER_ROOT_ANDROID} "${GSTREAMER_1_24_ROOT}")
+else ()
+    message(FATAL_ERROR "GSTREAMER_VERSION must be either 1.18 or 1.24")
+endif ()
+
 
 find_package(OpenCV REQUIRED java)
 
@@ -57,15 +72,15 @@ set(VULKAN_SHADERS vulkan_shaders/frag.glsl vulkan_shaders/vert.glsl)
 
 if(ANDROID)
     if (${ANDROID_ABI} STREQUAL "armeabi")
-        set(GSTREAMER_ROOT "${GSTREAMER_ROOT_ANDROID}/arm")
+        set(GSTREAMER_ROOT "$ENV{GSTREAMER_ROOT_ANDROID}/arm")
     elseif (${ANDROID_ABI} STREQUAL "armeabi-v7a")
-        set(GSTREAMER_ROOT "${GSTREAMER_ROOT_ANDROID}/armv7")
+        set(GSTREAMER_ROOT "$ENV{GSTREAMER_ROOT_ANDROID}/armv7")
     elseif (${ANDROID_ABI} STREQUAL "arm64-v8a")
-        set(GSTREAMER_ROOT "${GSTREAMER_ROOT_ANDROID}/arm64")
+        set(GSTREAMER_ROOT "$ENV{GSTREAMER_ROOT_ANDROID}/arm64")
     elseif (${ANDROID_ABI} STREQUAL "x86")
-        set(GSTREAMER_ROOT "${GSTREAMER_ROOT_ANDROID}/x86")
+        set(GSTREAMER_ROOT "$ENV{GSTREAMER_ROOT_ANDROID}/x86")
     elseif (${ANDROID_ABI} STREQUAL "x86_64")
-        set(GSTREAMER_ROOT "${GSTREAMER_ROOT_ANDROID}/x86_64")
+        set(GSTREAMER_ROOT "$ENV{GSTREAMER_ROOT_ANDROID}/x86_64")
     else ()
         message(STATUS "error Target arch ABI not supported: ${ANDROID_ABI}")
     endif()
@@ -73,29 +88,36 @@ if(ANDROID)
     link_directories(
             ${GSTREAMER_ROOT}/lib
             ${GSTREAMER_ROOT}/lib/gstreamer-1.0
-            ${GSTREAMER_ROOT}/lib/gio/modules
+            ${GSTREAMER_ROOT}/lib/gio/modules            
     )
 
     SET(GST_LIBS gstreamer-1.0 gioopenssl gmodule-2.0 gobject-2.0 glib-2.0 iconv intl ffi pcre2-8 z gio-2.0 gstnet-1.0 gsttag-1.0 gstinsertbin-1.0)
     SET(GST_PLUGINS_CORE_LIBS gstvideosignal gstwebrtcdsp gstladspa gstrsaudiofx gstrsvideofx gstvideoframe_audiolevel gstclosedcaption gstdebugutilsbad gstfieldanalysis gstfreeverb gstfrei0r gstgaudieffects gstgeometrictransform gstinter gstinterlace gstisac gstivtc gstlegacyrawparse gstproxy gstremovesilence gstsegmentclip gstsmooth gstspeed gstsoundtouch gsttimecode gstvideofiltersbad gstvideobox gstvideocrop gstvideomixer gstaccurip gstaes gstaiff gstaudiobuffersplit gstaudiofxbad gstaudiolatency gstaudiomixmatrix gstautoconvert gstbayer gstcoloreffects gstdebug gstdeinterlace gstdtmf gsteffectv gstequalizer gstgdkpixbuf gstimagefreeze gstinterleave gstlevel gstmultifile gstreplaygain gstshapewipe gstsmpte gstspectrum gstalpha gstalphacolor gstaudiofx gstcairo gstcutter gstopengl gstipcpipeline gstrsrtp gstrsrtsp gstwebrtchttp gstrswebrtc gstudp gstdtls gstnetsim gstrist gstrtmp2 gstrtpmanagerbad gstrtponvif gstsctp gstsdpelem gstsrtp gstsrt gstwebrtc gstnice gstrtspclientsink gstaws gsthlssink3 gstndi gstrsonvif gstraptorq gstreqwest gstclaxon gstdav1d gstrsclosedcaption gstffv1 gstfmp4 gstmp4 gstgif gsthsv gstlewton gstrav1e gstjson gstrspng gstregex gsttextwrap gsttextahead gsttcp gstrtsp gstrtp gstrtpmanager gstsoup gstmxf gstopenh264 gstopusparse gstpcapparse gstpnm gstrfbsrc gstsiren gstsmoothstreaming gstsubenc gstvideoparsersbad gsty4mdec gstjpegformat gstgdp gstrsvg gstopenjpeg gstspandsp gstsbc gstzbar gstandroidmedia gstcdg gstauparse gstwavenc gstwavpack gstwavparse gstxingmux gsty4menc gstadpcmdec gstadpcmenc gstassrender gstbz2 gstcodecalpha gstcodectimestamper gstdash gstdvbsubenc gstdvbsuboverlay gstdvdspu gsthls gstid3tag gstivfparse gstmidi gstaudioparsers gstavi gstdv gstflac gstflv gstflxdec gsticydemux gstid3demux gstisomp4 gstjpeg gstlame gstmatroska gstmpg123 gstmulaw gstmultipart gstpng gstspeex gsttaglib gstvpx gsturiplaylistbin gstsubparse gstogg gsttheora gstvorbis gstopus gstadaptivedemux2 gstalaw gstamrnb gstamrwbdec gstapetag gstplayback gstcoreelements gstcoretracers gstadder gstapp gstaudioconvert gstaudiomixer gstaudiorate gstaudioresample gstaudiotestsrc gstcompositor gstgio gstoverlaycomposition gstpango gstrawparse gsttypefindfunctions gstvideoconvertscale gstvideorate gstvideotestsrc gstvolume gstautodetect gstvideofilter gstinsertbin gstswitchbin gstfallbackswitch gstlivesync gstrsinter gstrstracers gstthreadshare gsttogglerecord)
     SET(GST_PLUGINS_BASE gstvideotestsrc gstautodetect gstallocators-1.0 orc-test-0.4 gstapp-1.0 gstaudio-1.0 gstfft-1.0 gstpbutils-1.0 gstriff-1.0 gstrtp-1.0 gstrtsp-1.0 gstsdp-1.0 gsttag-1.0 gstvideo-1.0 gstgl-1.0 orc-0.4 gstopensles OpenSLES gstaudio-1.0 gstbase-1.0 png16 freetype pangoft2-1.0 cairo bz2 pixman-1 fontconfig expat harfbuzz fribidi pangocairo-1.0 pango-1.0 opencore-amrwb opencore-amrnb gstpbutils-1.0 gstnet-1.0 psl xml2 crypto soup-2.4 sqlite3 ssl gstpbutils-1.0 opus vorbisenc vorbis ogg theoradec theoraenc vpx tag speex mpg123 mp3lame jpeg FLAC gstcodecparsers-1.0 dv gsturidownloader-1.0 gstisoff-1.0 gstadaptivedemux-1.0 srt ass nice gstwebrtc-1.0 gstsdp-1.0 gstsctp-1.0 srtp2 wavpack gstphotography-1.0 gstallocators-1.0 gstgl-1.0 zbar sbc spandsp gstcodecparsers-1.0 openjp2 gstwebrtc-1.0 gstsctp-1.0 gstsdp-1.0 gstwebrtcnice-1.0 gstrtsp-1.0 gstrtspserver-1.0 cairo rsvg-2 gdk_pixbuf-2.0 ffi tiff openh264 dav1d gdk_pixbuf-2.0 pangocairo-1.0 pangoft2-1.0 pango-1.0 croco-0.6 gstcontroller-1.0 graphene-1.0 gstgl-1.0 EGL GLESv2 m dl cairo cairo-gobject SoundTouch ltc webrtc-audio-coding-1 webrtc-audio-processing-1 gstbadaudio-1.0 android)
 
-    add_library(static_gstreamer SHARED nativelib/dummy.cpp nativelib/static_gstreamer.c)
+    add_library(gstreamer_android SHARED nativelib/dummy.cpp nativelib/static_gstreamer.c)
+    
     target_include_directories(
-            static_gstreamer PRIVATE
+            gstreamer_android PRIVATE
             "${GSTREAMER_ROOT}/include/gstreamer-1.0"
             "${GSTREAMER_ROOT}/include/glib-2.0"
             "${GSTREAMER_ROOT}/lib/glib-2.0/include")
     target_link_libraries(
-            static_gstreamer PUBLIC ${GST_LIBS} ${GST_PLUGINS_CORE_LIBS} ${GST_PLUGINS_BASE} iconv log android
-    )
-    target_link_libraries( static_gstreamer PUBLIC
+            gstreamer_android PUBLIC
+            ${GST_LIBS} 
+            ${GST_PLUGINS_CORE_LIBS} 
+            ${GST_PLUGINS_BASE}  
             ${GLIB_LIBRARIES}
             ${GST_LIBRARIES}
             ${log-lib}
             orc-0.4
-            -liconv
+            iconv 
+            log 
+            android
     )
+    target_compile_definitions(gstreamer_android PRIVATE -DANDROID_STL=c++_shared)
+
+
     add_library(
         hello_xr MODULE
         ${LOCAL_SOURCE}
@@ -111,9 +133,11 @@ if(ANDROID)
             "${GSTREAMER_ROOT}/lib/glib-2.0/include"
             )
     
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
     target_link_libraries(
-        hello_xr PRIVATE ${ANDROID_LIBRARY} ${ANDROID_LOG_LIBRARY} static_gstreamer          
+        hello_xr PRIVATE 
+            ${ANDROID_LIBRARY} 
+            ${ANDROID_LOG_LIBRARY} 
+            gstreamer_android                      
     )
 
     # Only for Android because it lacks a command line
@@ -124,6 +148,8 @@ if(ANDROID)
     target_compile_definitions(
         hello_xr PRIVATE DEFAULT_GRAPHICS_PLUGIN_VULKAN
     )
+
+    target_compile_options(hello_xr PRIVATE -fPIC)
 
 else()
     add_executable(hello_xr ${LOCAL_SOURCE} ${LOCAL_HEADERS} ${VULKAN_SHADERS})

@@ -9,6 +9,7 @@
 #include "platformplugin.h"
 #include "graphicsplugin.h"
 #include "openxr_program.h"
+#include "dlfcn.h"
 
 #if defined(ANDROID)
 #include <string.h>
@@ -195,33 +196,61 @@ static void app_handle_cmd(struct android_app* app, int32_t cmd) {
     }
 }
 
-//static jstring gst_native_get_gstreamer_info (JNIEnv * env, jobject /*thiz*/)
-//{
-//    char *version_utf8 = gst_version_string ();
-//    jstring version_jstring = env->NewStringUTF (version_utf8);
-//    g_free (version_utf8);
-//    return version_jstring;
-//}
-//
-//static JNINativeMethod native_methods[] = {
-//        {"nativeGetGStreamerInfo", "()Ljava/lang/String;",
-//         (void *) gst_native_get_gstreamer_info}
-//};
-//
-//jint JNI_OnLoad (JavaVM * vm, void */*reserved*/)
-//{
-//    JNIEnv *env = NULL;
-//
-//    if (vm->GetEnv ((void **) &env, JNI_VERSION_1_4) != JNI_OK) {
-//        __android_log_print (ANDROID_LOG_ERROR, "tutorial-1",
-//                             "Could not retrieve JNIEnv");
-//        return 0;
-//    }
-//    jclass klass = env->FindClass ("org/freedesktop/gstreamer/tutorials/tutorial_1/Tutorial1");
-//    env->RegisterNatives (klass, native_methods, G_N_ELEMENTS (native_methods));
-//
-//    return JNI_VERSION_1_4;
-//}
+void print_all_decoders() {
+    GList *decoders = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODABLE,
+                                                            GST_RANK_NONE );
+
+    Log::Write(Log::Level::Warning, "{Printing all decoders:}");
+
+    int i = 0;
+
+    // Iterate through the list
+    for (GList *iter = decoders; iter != NULL; iter = iter->next) {
+        GstElementFactory *factory = (GstElementFactory *) iter->data;
+
+        // Get the factory name suitable for use in a string pipeline
+        gchar *name = gst_element_get_name(factory);
+
+        // Print the factory name
+        Log::Write(Log::Level::Warning, Fmt("Decoder: %s\n", name));
+        g_free(name);
+        ++i;
+    }
+    Log::Write(Log::Level::Warning, Fmt("{Finished Printing all decoders:%d}", i));
+    gst_plugin_feature_list_free(decoders);
+}
+
+std::atomic<bool> is_gstreamer_ready{false};
+static void nativeNotifyGStreamerIsReady(JNIEnv */*env*/, jobject /*thiz*/) {
+    Log::Write(Log::Level::Info,
+    "nativeNotifyGStreamerIsReady");
+    is_gstreamer_ready = true;
+    print_all_decoders();
+}
+
+static JNINativeMethod native_methods[] = {
+        {"nativeNotifyGStreamerIsReady", "()V",
+         (void *) nativeNotifyGStreamerIsReady}
+};
+
+static JavaVM * g_vm;
+jint JNI_OnLoad (JavaVM * vm, void */*reserved*/)
+{
+    Log::Write(Log::Level::Info, "JNI_OnLoad");
+    JNIEnv *env = NULL;
+
+    g_vm = vm;
+
+    if (vm->GetEnv ((void **) &env, JNI_VERSION_1_4) != JNI_OK) {
+        __android_log_print (ANDROID_LOG_ERROR, "hello_xr",
+                             "Could not retrieve JNIEnv");
+        return 0;
+    }
+    jclass klass = env->FindClass ("org/quest_teleop/xr_native/XrNativeActivity");
+    env->RegisterNatives (klass, native_methods,G_N_ELEMENTS (native_methods));
+    return JNI_VERSION_1_4;
+}
+
 
 /**
  * This is the main entry point of a native application that is using
@@ -229,14 +258,51 @@ static void app_handle_cmd(struct android_app* app, int32_t cmd) {
  * event loop for receiving input events and doing other things.
  */
 void android_main(struct android_app* app) {
+    Log::Write(Log::Level::Info, "Starting android_main");
+    
+    while (!is_gstreamer_ready) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    Log::Write(Log::Level::Info, "GStreamer is ready");
+    
     try {
         JNIEnv* Env;
-        app->activity->vm->AttachCurrentThread(&Env, nullptr);
+        
+        JavaVMAttachArgs args;
+        args.version = JNI_VERSION_1_4; // choose your JNI version
+        args.name = NULL; // you might want to give the java thread a name
+        args.group = NULL; // you might want to assign the java thread to a ThreadGroup
+//        app->activity->vm->AttachCurrentThread(&Env, &args);
+
+        g_vm->AttachCurrentThread(&Env, &args);
 
         AndroidAppState appState = {};
 
         app->userData = &appState;
         app->onAppCmd = app_handle_cmd;
+
+//        Log::Write(Log::Level::Warning, "looking for class");
+//        
+//        //jclass clazz = Env->FindClass("org/quest_teleop/xr_native/XrNativeActivity");
+////        if (clazz == nullptr) {
+////            Log::Write(Log::Level::Error, "Failed to find class");
+////            //return;
+////        }
+//        Log::Write(Log::Level::Warning, "looking for class method");
+//        jmethodID methodID = Env->GetMethodID(klass, "initGstreamer", "()V");
+//        if (methodID == nullptr) {
+//            Log::Write(Log::Level::Error, "Failed to find method");
+//            //return;
+//        }
+//        Log::Write(Log::Level::Warning, "Executing class method");
+//        Env->CallVoidMethod(app->activity->clazz, methodID);
+//        Log::Write(Log::Level::Warning, "Executed class method");
+
+        //std::this_thread::sleep_for(std::chrono::seconds (10));
+        //gst_init_static_plugins();
+        //gst_init(nullptr, nullptr);
+        //gst_android_init (Env, app->activity->clazz);
+        print_all_decoders();
 
         std::shared_ptr<Options> options = std::make_shared<Options>();
         if (!UpdateOptionsFromSystemProperties(*options)) {
@@ -315,7 +381,8 @@ void android_main(struct android_app* app) {
             program->RenderFrame();
         }
 
-        app->activity->vm->DetachCurrentThread();
+        g_vm->DetachCurrentThread();
+        //app->activity->vm->DetachCurrentThread();
     } catch (const std::exception& ex) {
         Log::Write(Log::Level::Error, ex.what());
     } catch (...) {

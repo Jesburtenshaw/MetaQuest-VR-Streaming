@@ -5,7 +5,7 @@
 #include <gst/app/gstappsink.h>
 #include <gst/gstbus.h>
 #include "logger.h"
-#include "nativelib/static_gstreamer.h"
+//#include "nativelib/static_gstreamer.h"
 #include "common.h"
 
 namespace quest_teleop {
@@ -126,9 +126,9 @@ namespace quest_teleop {
     
     void Pipeline::InitializeGStreamer() {
         if (!is_initialized) {
-            gst_init_static_plugins();
+            //gst_init_static_plugins();
             Log::Write(Log::Level::Verbose, "Initializing gstreamer");
-            gst_init(nullptr, nullptr);
+            //gst_init(nullptr, nullptr);
             is_initialized = true;
         }
     }
@@ -139,7 +139,7 @@ namespace quest_teleop {
         // Onstructing pipeline string
         auto portStr = std::to_string(m_streamConfig.port);
         std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert name=videoconvert"+ portStr +" ! video/x-raw,format=RGB ! appsink name=appsink" + portStr;
-
+        
         Log::Write(Log::Level::Info, "Created context");
         m_dataContext = g_main_context_new();
         g_main_context_push_thread_default(m_dataContext);

@@ -24,6 +24,11 @@
 
 #include <opencv2/core.hpp>
 
+#include <gst/gst.h>
+#include <gio/gio.h>
+#include <glib.h>
+#include <glib/gmem.h>
+
 using namespace quest_teleop;
 
 
@@ -38,6 +43,30 @@ namespace {
         const int RIGHT = 1;
         const int COUNT = 2;
     }  // namespace Side
+    
+    void print_all_decoders() {
+        GList *decoders = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODABLE,
+                                                                GST_RANK_NONE );
+
+        Log::Write(Log::Level::Warning, "{Printing all decoders:}");
+        
+        int i = 0;
+
+        // Iterate through the list
+        for (GList *iter = decoders; iter != NULL; iter = iter->next) {
+            GstElementFactory *factory = (GstElementFactory *) iter->data;
+
+            // Get the factory name suitable for use in a string pipeline
+            gchar *name = gst_element_get_name(factory);
+
+            // Print the factory name
+            Log::Write(Log::Level::Warning, Fmt("Decoder: %s\n", name));
+            g_free(name);
+            ++i;
+        }
+        Log::Write(Log::Level::Warning, Fmt("{Finished Printing all decoders:%d}", i));
+        gst_plugin_feature_list_free(decoders);
+    }
 
     inline std::string GetXrVersionString(XrVersion ver) {
         return Fmt("%d.%d.%d", XR_VERSION_MAJOR(ver), XR_VERSION_MINOR(ver), XR_VERSION_PATCH(ver));
@@ -122,6 +151,8 @@ namespace {
                   m_acceptableBlendModes{XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
                                          XR_ENVIRONMENT_BLEND_MODE_ADDITIVE,
                                          XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND} {
+
+            
             // Read JSON config file
             using json = nlohmann::json;
             std::string json_string = R"(
@@ -238,6 +269,8 @@ namespace {
             }
 
             Log::Write(Log::Level::Warning, "All initialized!");
+
+            print_all_decoders();
         }
 
         ~OpenXrProgram() override {
