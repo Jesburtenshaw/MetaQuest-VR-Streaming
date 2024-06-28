@@ -1,0 +1,38 @@
+sudo apt-get update
+sudo apt-get install default-jre cmake
+
+cd ~
+mkdir android_sdk
+cd android_sdk
+wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+unzip commandlinetools-linux-11076708_latest.zip
+cd cmdline-tools
+mkdir latest
+
+move contents of this folder to the folder "latest"
+
+cd latest
+
+./sdkmanager "platform-tools" "platforms;android-33"
+./sdkmanager --install "ndk;26.3.11579264"
+./sdkmanager --install "build-tools;34.0.0"
+
+cd ~
+mkdir opencv
+cd opencv 
+wget https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-android-sdk.zip
+unzip opencv-4.10.0-android-sdk.zip
+
+In CmakeLists.txt change line 21 to ~/opencv/OpenCV-android-sdk/sdk/native/jni
+
+cd ~
+mkdir gstreamer
+cd gstreamer
+wget https://gstreamer.freedesktop.org/data/pkg/android/1.24.5/gstreamer-1.0-android-universal-1.24.5.tar.xz
+tar xf gstreamer-1.0-android-universal-1.24.5.tar.xz
+
+In CMakeLists.txt change line 23 to ~/gstreamer/
+
+cd ~
+cd quest_streaming/src/tests/hello_xr
+./gradlew 
