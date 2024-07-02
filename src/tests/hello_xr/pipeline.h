@@ -84,8 +84,6 @@ namespace quest_teleop {
         Pipeline &operator=(const Pipeline &) = delete;
 
     public:
-        static void InitializeGStreamer();
-
         Pipeline(const StreamConfig &streamConfig);
 
         ~Pipeline();
@@ -129,7 +127,6 @@ namespace quest_teleop {
 
     private:
         std::deque <SampleRead> m_samples;
-        static bool is_initialized;
         GstElement *m_pipeline;
         GstBus *m_bus;
         GstMessage *m_msg;

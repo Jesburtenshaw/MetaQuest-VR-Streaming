@@ -16,6 +16,7 @@
 
 #include "logger.h"
 
+extern JavaVM *g_vm;
 // Macro to generate stringify functions for OpenXR enumerations based data provided in openxr_reflection.h
 // clang-format off
 #define ENUM_CASE_STR(name, val) case name: return #name;

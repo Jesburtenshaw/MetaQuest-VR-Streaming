@@ -1708,10 +1708,6 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                 if (image.empty()) {
                     Log::Write(Log::Level::Error, "RenderView: Empty image");
                     continue;
-                } else {
-                    Log::Write(Log::Level::Info,
-                               Fmt("RenderView: Starting copy   cols = %d, rows = %d", image.cols,
-                                   image.rows));
                 }
 
                 auto pipelineScreenLayout = m_pipelineScreenLayouts[pair.first].get();
@@ -1771,7 +1767,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                 vkCmdDrawIndexed(m_cmdBuffer.buf, m_drawBuffer.count.idx, 1, 0, 0, 0);
             }
         }
-        Log::Write(Log::Level::Info, "RenderView: End copying");
+        
         vkCmdEndRenderPass(m_cmdBuffer.buf);
         m_cmdBuffer.End();
         m_cmdBuffer.Exec(m_vkQueue);

@@ -1246,33 +1246,10 @@ namespace {
                 }
             }
 
-//            // Render a 10cm cube scaled by grabAction for each hand. Note renderHand will only be
-//            // true when the application has focus.
-//            for (auto hand : {Side::LEFT, Side::RIGHT}) {
-//                XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
-//                res = xrLocateSpace(m_input.handSpace[hand], m_appSpace, predictedDisplayTime, &spaceLocation);
-//                CHECK_XRRESULT(res, "xrLocateSpace");
-//                if (XR_UNQUALIFIED_SUCCESS(res)) {
-//                    if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
-//                        (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-//                        float scale = 0.1f * m_input.handScale[hand];
-//                        cubes.push_back(Cube{spaceLocation.pose, {scale, scale, scale}});
-//                    }
-//                } else {
-//                    // Tracking loss is expected when the hand is not active so only log a message
-//                    // if the hand is active.
-//                    if (m_input.handActive[hand] == XR_TRUE) {
-//                        const char* handName[] = {"left", "right"};
-//                        Log::Write(Log::Level::Verbose,
-//                                   Fmt("Unable to locate %s hand action space in app space: %d", handName[hand], res));
-//                    }
-//                }
-//            }
-
             std::map<std::string, cv::Mat> mono_images;
             std::map<std::string, cv::Mat> stereo_images[2];            
             for (auto i = 0; i < m_pipelines.size(); i++) {
-                Log::Write(Log::Level::Info, Fmt("Getting image from pipeline: %s, %d", m_pipelines[i]->GetPipelineName().c_str(), m_pipelines[i]->GetPipelineType()));
+                //Log::Write(Log::Level::Info, Fmt("Getting image from pipeline: %s, %d", m_pipelines[i]->GetPipelineName().c_str(), m_pipelines[i]->GetPipelineType()));
                 if (m_pipelines[i]->GetPipelineType() == StreamType::Mono) {
                     mono_images.insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage()});
                 } else {
@@ -1287,7 +1264,7 @@ namespace {
                 }
             }
 
-            Log::Write(Log::Level::Info, "[RENDERING]Finished getting images");
+            //Log::Write(Log::Level::Info, "[RENDERING]Finished getting images");
             // Render view to the appropriate part of the swapchain image.
             for (uint32_t i = 0; i < viewCountOutput; i++) {
                 // Each view has a separate swapchain which is acquired, rendered to, and released.
@@ -1311,7 +1288,7 @@ namespace {
                 projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width,
                                                                      viewSwapchain.height};
 
-                TimeRecorder timeRecorder(true);
+                //TimeRecorder timeRecorder(true);
 
                 const XrSwapchainImageBaseHeader *const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
                 m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage,
@@ -1319,7 +1296,7 @@ namespace {
 
                 XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
                 CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
-                timeRecorder.LogElapsedTime("Rendering took ");
+                //timeRecorder.LogElapsedTime("Rendering took ");
 
             }
 

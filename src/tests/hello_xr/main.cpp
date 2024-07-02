@@ -233,7 +233,7 @@ static JNINativeMethod native_methods[] = {
          (void *) nativeNotifyGStreamerIsReady}
 };
 
-static JavaVM * g_vm;
+JavaVM *g_vm;
 jint JNI_OnLoad (JavaVM * vm, void */*reserved*/)
 {
     Log::Write(Log::Level::Info, "JNI_OnLoad");
@@ -272,7 +272,6 @@ void android_main(struct android_app* app) {
         args.version = JNI_VERSION_1_4; // choose your JNI version
         args.name = NULL; // you might want to give the java thread a name
         args.group = NULL; // you might want to assign the java thread to a ThreadGroup
-//        app->activity->vm->AttachCurrentThread(&Env, &args);
 
         g_vm->AttachCurrentThread(&Env, &args);
 
@@ -280,29 +279,6 @@ void android_main(struct android_app* app) {
 
         app->userData = &appState;
         app->onAppCmd = app_handle_cmd;
-
-//        Log::Write(Log::Level::Warning, "looking for class");
-//        
-//        //jclass clazz = Env->FindClass("org/quest_teleop/xr_native/XrNativeActivity");
-////        if (clazz == nullptr) {
-////            Log::Write(Log::Level::Error, "Failed to find class");
-////            //return;
-////        }
-//        Log::Write(Log::Level::Warning, "looking for class method");
-//        jmethodID methodID = Env->GetMethodID(klass, "initGstreamer", "()V");
-//        if (methodID == nullptr) {
-//            Log::Write(Log::Level::Error, "Failed to find method");
-//            //return;
-//        }
-//        Log::Write(Log::Level::Warning, "Executing class method");
-//        Env->CallVoidMethod(app->activity->clazz, methodID);
-//        Log::Write(Log::Level::Warning, "Executed class method");
-
-        //std::this_thread::sleep_for(std::chrono::seconds (10));
-        //gst_init_static_plugins();
-        //gst_init(nullptr, nullptr);
-        //gst_android_init (Env, app->activity->clazz);
-        print_all_decoders();
 
         std::shared_ptr<Options> options = std::make_shared<Options>();
         if (!UpdateOptionsFromSystemProperties(*options)) {

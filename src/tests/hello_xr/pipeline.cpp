@@ -5,7 +5,7 @@
 #include <gst/app/gstappsink.h>
 #include <gst/gstbus.h>
 #include "logger.h"
-//#include "nativelib/static_gstreamer.h"
+
 #include "common.h"
 
 namespace quest_teleop {
@@ -122,20 +122,7 @@ namespace quest_teleop {
         }
     } // namespace
 
-    bool Pipeline::is_initialized = false;
-    
-    void Pipeline::InitializeGStreamer() {
-        if (!is_initialized) {
-            //gst_init_static_plugins();
-            Log::Write(Log::Level::Verbose, "Initializing gstreamer");
-            //gst_init(nullptr, nullptr);
-            is_initialized = true;
-        }
-    }
-
     Pipeline::Pipeline(const StreamConfig &streamConfig) : m_streamConfig{streamConfig}, m_width{-1}, m_height{-1} {
-        InitializeGStreamer();
-        
         // Onstructing pipeline string
         auto portStr = std::to_string(m_streamConfig.port);
         std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert name=videoconvert"+ portStr +" ! video/x-raw,format=RGB ! appsink name=appsink" + portStr;
@@ -169,15 +156,10 @@ namespace quest_teleop {
         if (!m_vc_factory) {
             Log::Write(Log::Level::Error,
                        "Couldn't find videoconvert factory element");
-        } else {
-            Log::Write(Log::Level::Info,
-                       "Pad capabilities before receiving the stream.");
-            print_pad_capabilities(m_vc_factory,
-                                   "sink");
         }
 
         Log::Write(Log::Level::Info, "Setting pipeline to playing");
-/* Start playing */
+        /* Start playing */
         auto ret = gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
         if (ret == GST_STATE_CHANGE_FAILURE) {
             Log::Write(Log::Level::Error,
@@ -186,7 +168,7 @@ namespace quest_teleop {
             Log::Write(Log::Level::Info, "Pipeline is playing");
 
             Log::Write(Log::Level::Info, "First query");
-/* Wait until error or EOS */
+            /* Wait until error or EOS */
             m_bus = gst_element_get_bus(m_pipeline);
             m_msg = gst_bus_timed_pop_filtered(m_bus, 10000000,
                                                (GstMessageType)(GST_MESSAGE_ERROR |
@@ -291,12 +273,22 @@ namespace quest_teleop {
     }
 
     void Pipeline::SetVideoSize() {
-        print_pad_capabilities(m_vc_factory, "sink");
+        //print_pad_capabilities(m_vc_factory, "sink");
         getPadProperty(m_vc_factory, "sink", "width", &m_width);
         getPadProperty(m_vc_factory, "sink", "height", &m_height);
     }
 
     void Pipeline::SampleReader() {
+        JNIEnv *env;
+        JavaVMAttachArgs args;
+        args.version = JNI_VERSION_1_4;
+        args.name = NULL;
+        args.group = NULL;
+        while (!g_vm) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            Log::Write(Log::Level::Info, "Waiting for the Java VM to be initialized");
+        }
+        g_vm->AttachCurrentThread(&env, &args);
         while (!m_exit) {
             TimeRecorder timeRecorder = TimeRecorder(true);
 
@@ -304,7 +296,7 @@ namespace quest_teleop {
                                          (GstMessageType)(GST_MESSAGE_ERROR |
                                                           GST_MESSAGE_EOS));
 
-            timeRecorder.LogElapsedTime("Pop filter returned after ");
+            
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 if (m_samples.size() > kMaxSamples) {
@@ -312,15 +304,12 @@ namespace quest_teleop {
                 }
                 m_samples.emplace_back();
             }
-            timeRecorder.LogElapsedTime("Locking took ");
+            
 
             SampleRead &sampleRead = m_samples.back();
             if (m_msg) {
-                /* See next tutorial for proper error message handling/parsing */
                 if (GST_MESSAGE_TYPE(m_msg) == GST_MESSAGE_ERROR) {
-                    Log::Write(Log::Level::Error,
-                               "An error occurred! Re-run with the GST_DEBUG=*:WARN environment "
-                               "variable set for more details.");
+                    Log::Write(Log::Level::Error, "An error occurred!");
                 }
                 for (int i = 0; i < 2; ++i) {
                     sampleRead.images[i] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
@@ -333,34 +322,30 @@ namespace quest_teleop {
 
                 gst_message_unref(m_msg);
             } else {
-                Log::Write(Log::Level::Info, "Getting sample");
+                //Log::Write(Log::Level::Info, "Getting sample");
                 sampleRead.sample = gst_app_sink_pull_sample(m_appSink);
-                timeRecorder.LogElapsedTime("Getting a sample took ");
+                //timeRecorder.LogElapsedTime("Getting a sample took ");
                 if (sampleRead.sample) {
-                    Log::Write(Log::Level::Info, "getting buffer");
+                    //Log::Write(Log::Level::Info, "getting buffer");
                     GstBufferList *bufferList = gst_sample_get_buffer_list(sampleRead.sample);
-                    timeRecorder.LogElapsedTime("Getting a buffer list took ");
+                    //timeRecorder.LogElapsedTime("Getting a buffer list took ");
                     if (bufferList) {
                         auto totalSize = gst_buffer_list_calculate_size(bufferList);
                         auto length = gst_buffer_list_length(bufferList);
                         std::stringstream ss;
                         ss << "Total size of the sample is: " << totalSize
                            << ". Length of the list is: " << length << ".";
-                        Log::Write(Log::Level::Info, ss.str());
+                        //Log::Write(Log::Level::Info, ss.str());
                     }
                     sampleRead.buffer = gst_sample_get_buffer(sampleRead.sample);
-                    timeRecorder.LogElapsedTime("Getting a buffer sample took ");
+                    //timeRecorder.LogElapsedTime("Getting a buffer sample took ");
                     if (sampleRead.buffer) {
-                        Log::Write(Log::Level::Info, "mapping");
+                        //Log::Write(Log::Level::Info, "mapping");
 
                         sampleRead.mapped = gst_buffer_map(sampleRead.buffer, &sampleRead.info,
                                                            GST_MAP_READ);
-                        timeRecorder.LogElapsedTime("Mapping buffer took ");
+                        //timeRecorder.LogElapsedTime("Mapping buffer took ");
                         if (sampleRead.mapped) {
-                            const auto str_size =
-                                    std::string("Size is") +
-                                    std::to_string(sampleRead.info.size);
-
                             if (m_width == -1) {
                                 Log::Write(Log::Level::Warning,
                                            "Width and height not set");
@@ -370,11 +355,14 @@ namespace quest_teleop {
                                            "Width: " + std::to_string(m_width) +
                                            " Height: " + std::to_string(m_height));
                             }
-
+                            
+                            // Case of RGB image.
                             if (sampleRead.info.size != m_width * m_height * 3) {
                                 throw std::runtime_error(
                                         "Size of the buffer is not as expected");
                             }
+                            Log::Write(Log::Level::Info,
+                                       "Got a sample");
                             if (m_streamConfig.type == StreamType::Mono || m_streamConfig.side != PipelineSide::Both) {
                                 sampleRead.images[static_cast<int>(m_streamConfig.side)] = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
                                                            sampleRead.info.data);
@@ -407,17 +395,19 @@ namespace quest_teleop {
             }
 
         }
+        g_vm->DetachCurrentThread();
     }
 
     cv::Mat &Pipeline::GetImage(PipelineSide side) {
-        Log::Write(Log::Level::Info,m_streamConfig.name + " Getting image");
+        //Log::Write(Log::Level::Info,m_streamConfig.name + " Getting image");
         if (m_streamConfig.side != PipelineSide::Both) {
             side = m_streamConfig.side;
         }
-        TimeRecorder timeRecorder = TimeRecorder(true);
+        //TimeRecorder timeRecorder = TimeRecorder(true);
         std::lock_guard<std::mutex> lock(m_mutex);
-        timeRecorder.LogElapsedTime("Locking in getImage took ");
+        //timeRecorder.LogElapsedTime("Locking in getImage took ");
         if (m_samples.size() <= 1) {
+            Log::Write(Log::Level::Info,m_streamConfig.name + "Pushing fictional image");
             m_samples.emplace_front();
             SampleRead &sample = m_samples.front();
             sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
