@@ -125,8 +125,8 @@ namespace quest_teleop {
     Pipeline::Pipeline(const StreamConfig &streamConfig) : m_streamConfig{streamConfig}, m_width{-1}, m_height{-1} {
         // Onstructing pipeline string
         auto portStr = std::to_string(m_streamConfig.port);
-        std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert name=videoconvert"+ portStr +" ! video/x-raw,format=RGB ! appsink name=appsink" + portStr;
-        
+        //std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert name=videoconvert"+ portStr +" ! vulkanupload ! vulkanconvert ! video/x-raw(memory:VulkanImage),format=RGBA ! appsink name=appsink" + portStr;
+        std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! h264parse ! amcviddec-omxqcomvideodecoderavc name=decoder"+ portStr +" ! appsink name=appsink" + portStr; /*glcolorconvert ! gldownload !*/
         Log::Write(Log::Level::Info, "Created context");
         m_dataContext = g_main_context_new();
         g_main_context_push_thread_default(m_dataContext);
@@ -150,12 +150,12 @@ namespace quest_teleop {
             Log::Write(Log::Level::Error, "couldn't find appsink");
         }
 
-        std::string videoConvertStr = "videoconvert" + portStr;
+        std::string videoConvertStr = "decoder" + portStr;
         m_vc_factory =
                 gst_bin_get_by_name((GstBin * )(m_pipeline), videoConvertStr.c_str());
         if (!m_vc_factory) {
             Log::Write(Log::Level::Error,
-                       "Couldn't find videoconvert factory element");
+                       "Couldn't find decoder factory element");
         }
 
         Log::Write(Log::Level::Info, "Setting pipeline to playing");
@@ -166,6 +166,13 @@ namespace quest_teleop {
                        "Unable to set the pipeline to the playing state.");
         } else {
             Log::Write(Log::Level::Info, "Pipeline is playing");
+            
+            m_vc_factory =
+                    gst_bin_get_by_name((GstBin * )(m_pipeline), videoConvertStr.c_str());
+            if (!m_vc_factory) {
+                Log::Write(Log::Level::Error,
+                           "Couldn't find decoder factory element after playing started");
+            }
 
             Log::Write(Log::Level::Info, "First query");
             /* Wait until error or EOS */
@@ -357,19 +364,19 @@ namespace quest_teleop {
                             }
                             
                             // Case of RGB image.
-                            if (sampleRead.info.size != m_width * m_height * 3) {
+                            if (sampleRead.info.size != m_width * m_height * 1.5) {
+                                Log::Write(Log::Level::Error,
+                                           Fmt("Size of the buffer is not as expected. Size is %d.", sampleRead.info.size));
                                 throw std::runtime_error(
                                         "Size of the buffer is not as expected");
                             }
                             Log::Write(Log::Level::Info,
                                        "Got a sample");
                             if (m_streamConfig.type == StreamType::Mono || m_streamConfig.side != PipelineSide::Both) {
-                                sampleRead.images[static_cast<int>(m_streamConfig.side)] = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
-                                                           sampleRead.info.data);
+                                sampleRead.images[static_cast<int>(m_streamConfig.side)] = cv::Mat(cv::Size(m_width, m_height), CV_8UC3, sampleRead.info.data);
 
                             } else {
-                                cv::Mat image = cv::Mat(cv::Size(m_width, m_height), CV_8UC3,
-                                                        sampleRead.info.data);
+                                cv::Mat image = cv::Mat(cv::Size(m_width, m_height), CV_8UC3, sampleRead.info.data);
                                 sampleRead.images[static_cast<int>(PipelineSide::Left)] = image(cv::Rect(0, 0, m_width / 2, m_height));
                                 sampleRead.images[static_cast<int>(PipelineSide::Right)] = image(cv::Rect(m_width / 2, 0, m_width / 2, m_height));
                             }
