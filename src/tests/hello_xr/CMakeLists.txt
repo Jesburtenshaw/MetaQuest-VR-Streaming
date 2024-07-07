@@ -52,7 +52,8 @@ set(LOCAL_HEADERS
     pch.h
     platformdata.h
     platformplugin.h 
-    pipeline.h
+    pipeline.h 
+    decoder.h
 )
 set(LOCAL_SOURCE
     graphicsplugin_factory.cpp
@@ -66,6 +67,7 @@ set(LOCAL_SOURCE
     platformplugin_posix.cpp
     platformplugin_win32.cpp 
     pipeline.cpp
+    decoder.cpp
 )
 set(VULKAN_SHADERS vulkan_shaders/frag.glsl vulkan_shaders/vert.glsl)
 #set(VULKAN_SHADERS vulkan_shaders/shader.frag vulkan_shaders/shader.vert)
@@ -114,9 +116,8 @@ if(ANDROID)
             iconv 
             log 
             android
-    )
-    target_compile_definitions(gstreamer_android PRIVATE -DANDROID_STL=c++_shared)
-
+    ) 
+    target_compile_definitions(gstreamer_android PRIVATE -DANDROID_STL=c++_shared PUBLIC GST_AMC_IGNORE_UNKNOWN_COLOR_FORMATS=1)
 
     add_library(
         hello_xr MODULE
@@ -136,7 +137,8 @@ if(ANDROID)
     target_link_libraries(
         hello_xr PRIVATE 
             ${ANDROID_LIBRARY} 
-            ${ANDROID_LOG_LIBRARY} 
+            ${ANDROID_LOG_LIBRARY}
+            mediandk
             gstreamer_android                      
     )
 

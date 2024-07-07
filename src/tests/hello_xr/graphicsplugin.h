@@ -6,6 +6,9 @@
 
 #include <opencv2/opencv.hpp>
 #include "pipeline.h"
+#include "decoder.h"
+
+using namespace quest_teleop;
 
 struct Cube {
     XrPosef Pose;
@@ -35,7 +38,7 @@ struct IGraphicsPlugin {
 
     // Render to a swapchain image for a projection view.
     virtual void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-                            int64_t swapchainFormat, const std::map<std::string, cv::Mat>& mono_images, const std::map<std::string, cv::Mat>& stereo_images) = 0;
+                            int64_t swapchainFormat, const std::map<std::string, MediaFrame&>& mono_images, const std::map<std::string, MediaFrame&>& stereo_images) = 0;
 
     // Get recommended number of sub-data element samples in view (recommendedSwapchainSampleCount)
     // if supported by the graphics plugin. A supported value otherwise.

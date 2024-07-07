@@ -15,6 +15,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include "decoder.h"
 
 namespace quest_teleop {
     enum class StreamType {
@@ -46,36 +47,6 @@ namespace quest_teleop {
         int height;
     };
     
-    struct SampleRead {
-        // delete copy constructor
-        SampleRead(const SampleRead &) = delete;
-
-        // delete copy assignment
-        SampleRead &operator=(const SampleRead &) = delete;
-
-        SampleRead() {
-            images[0] = cv::Mat(cv::Size(10, 10), CV_8UC3,
-                            cv::Scalar(0, 0, 200));
-            images[1] = cv::Mat(cv::Size(10, 10), CV_8UC3,
-                            cv::Scalar(0, 0, 200));
-        }
-
-        ~SampleRead() {
-            if (buffer && mapped) {
-                gst_buffer_unmap(buffer, &info);
-            }
-            if (sample) {
-                gst_sample_unref(sample);
-            }
-        }
-
-        cv::Mat images[2];
-        GstMapInfo info;
-        GstBuffer *buffer = nullptr;
-        GstSample *sample = nullptr;
-        bool mapped = false;
-    };
-    
     class Pipeline {
         //delete copy constructor
         Pipeline(const Pipeline &) = delete;
@@ -96,6 +67,10 @@ namespace quest_teleop {
         void SampleReader();
 
         cv::Mat &GetImage(PipelineSide side=PipelineSide::Left);
+        
+        MediaFrame& get_media_frame();
+        
+        bool is_media_frame_available() { return m_decoder->is_frame_available(); }
 
         StreamType GetPipelineType() const {
             return m_streamConfig.type;
@@ -126,7 +101,7 @@ namespace quest_teleop {
         }    
 
     private:
-        std::deque <SampleRead> m_samples;
+        std::unique_ptr<Decoder> m_decoder;        
         GstElement *m_pipeline;
         GstBus *m_bus;
         GstMessage *m_msg;
@@ -134,14 +109,14 @@ namespace quest_teleop {
         GMainContext *m_dataContext;
         std::atomic<bool> m_exit{false};
         std::unique_ptr <std::thread> m_thread;
-        std::mutex m_mutex;
-        static const int kMaxSamples = 10;
+        std::mutex m_mutex;        
 
         GstElement *m_vc_factory;
 
         int m_width;
         int m_height;   
         StreamConfig m_streamConfig;
+        int m_fd;
     };
 }   // namespace quest_teleop
 

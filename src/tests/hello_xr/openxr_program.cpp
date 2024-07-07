@@ -21,6 +21,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include "pipeline.h"
+#include "decoder.h"
 
 #include <opencv2/core.hpp>
 
@@ -162,8 +163,8 @@ namespace {
                      "type":"stereo",
                      "left_port":5004,
                      "right_port":5005,
-                     "width":480,
-                     "height":270,
+                     "width":1920,
+                     "height":1080,
                      "fps":30,
                      "codec":"h264",
                      "position":{
@@ -176,8 +177,8 @@ namespace {
                   "left":{
                      "type":"mono",
                      "port":5006,
-                     "width":480,
-                     "height":270,
+                     "width":1920,
+                     "height":1080,
                      "fps":30,
                      "codec":"h264",
                      "position":{
@@ -190,8 +191,8 @@ namespace {
                   "right":{
                      "type":"mono",
                      "port":5007,
-                     "width":480,
-                     "height":270,
+                     "width":1920,
+                     "height":1080,
                      "fps":30,
                      "codec":"h264",
                      "position":{
@@ -204,8 +205,8 @@ namespace {
                     "top":{
                      "type":"mono",
                      "port":5008,
-                     "width":480,
-                     "height":270,
+                     "width":1920,
+                     "height":1080,
                      "fps":30,
                      "codec":"h264",
                      "position":{
@@ -218,8 +219,8 @@ namespace {
                   "bottom":{
                      "type":"mono",
                      "port":5009,
-                     "width":480,
-                     "height":270,
+                     "width":1920,
+                     "height":1080,
                      "fps":30,
                      "codec":"h264",
                      "position":{
@@ -1246,21 +1247,22 @@ namespace {
                 }
             }
 
-            std::map<std::string, cv::Mat> mono_images;
-            std::map<std::string, cv::Mat> stereo_images[2];            
+            std::map<std::string, MediaFrame&> mono_images;
+            std::map<std::string, MediaFrame&> stereo_images[2];            
             for (auto i = 0; i < m_pipelines.size(); i++) {
+                if (!m_pipelines[i]->is_media_frame_available()) continue;
                 //Log::Write(Log::Level::Info, Fmt("Getting image from pipeline: %s, %d", m_pipelines[i]->GetPipelineName().c_str(), m_pipelines[i]->GetPipelineType()));
                 if (m_pipelines[i]->GetPipelineType() == StreamType::Mono) {
-                    mono_images.insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage()});
+                    mono_images.insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->get_media_frame()});
                 } else {
                     if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Left)
-                        stereo_images[static_cast<int>(PipelineSide::Left)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage()});
+                        stereo_images[static_cast<int>(PipelineSide::Left)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->get_media_frame()});
                     else if (m_pipelines[i]->GetPipelineSide() == PipelineSide::Right)
-                        stereo_images[static_cast<int>(PipelineSide::Right)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage()});
-                    else { // m_pipelines[i]->GetPipelineSide() == PipelineSide::Both
-                        stereo_images[static_cast<int>(PipelineSide::Left)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage(PipelineSide::Left)});
-                        stereo_images[static_cast<int>(PipelineSide::Right)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage(PipelineSide::Right)});
-                    }
+                        stereo_images[static_cast<int>(PipelineSide::Right)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->get_media_frame()});
+//                    else { // m_pipelines[i]->GetPipelineSide() == PipelineSide::Both
+//                        stereo_images[static_cast<int>(PipelineSide::Left)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage(PipelineSide::Left)});
+//                        stereo_images[static_cast<int>(PipelineSide::Right)].insert({m_pipelines[i]->GetPipelineName(), m_pipelines[i]->GetImage(PipelineSide::Right)});
+//                    }
                 }
             }
 

@@ -833,7 +833,7 @@ struct RenderTarget {
             auto qz = cos(roll/2) * cos(pitch/2) * sin(yaw/2) - sin(roll/2) * sin(pitch/2) * cos(yaw/2);
             auto qw = cos(roll/2) * cos(pitch/2) * cos(yaw/2) + sin(roll/2) * sin(pitch/2) * sin(yaw/2);
             
-            //m_pose.orientation = {qx, qy, qz, qw};
+            m_pose.orientation = {qx, qy, qz, qw};
             
             CreateUniformBuffer();
             CreateDescriptorPool();           
@@ -880,16 +880,18 @@ struct RenderTarget {
         }
 
         void CreateTextureImage(uint32_t width, uint32_t height) {
+            const auto half_width = width / 2;
+            const auto half_height = height / 2;
             m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_y, yuvBufferMemory_y);
-            m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_u, yuvBufferMemory_u);
-            m_memAllocator->createBuffer(width * height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_v, yuvBufferMemory_v);
+            m_memAllocator->createBuffer(half_width * half_height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_u, yuvBufferMemory_u);
+            m_memAllocator->createBuffer(half_width * half_height, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, yuvBuffer_v, yuvBufferMemory_v);
             vkMapMemory(m_vkDevice, yuvBufferMemory_y, 0, width * height, 0, &yuvBufferMemoryMapped_y);
-            vkMapMemory(m_vkDevice, yuvBufferMemory_u, 0, width * height , 0, &yuvBufferMemoryMapped_u);
-            vkMapMemory(m_vkDevice, yuvBufferMemory_v, 0, width * height , 0, &yuvBufferMemoryMapped_v);
+            vkMapMemory(m_vkDevice, yuvBufferMemory_u, 0, half_width * half_height , 0, &yuvBufferMemoryMapped_u);
+            vkMapMemory(m_vkDevice, yuvBufferMemory_v, 0, half_width * half_height , 0, &yuvBufferMemoryMapped_v);
 
             createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_y, textureImageMemory_y);
-            createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_u, textureImageMemory_u);
-            createImage(width, height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_v, textureImageMemory_v);
+            createImage(half_width, half_height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_u, textureImageMemory_u);
+            createImage(half_width, half_height, g_imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_v, textureImageMemory_v);
 
             textureImageView_y = createImageView(textureImage_y, g_imageFormat);
             textureImageView_u = createImageView(textureImage_u, g_imageFormat);
@@ -1666,7 +1668,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     }
 
     void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-                    int64_t /*swapchainFormat*/, const std::map<std::string, cv::Mat>& mono_images, const std::map<std::string, cv::Mat>& stereo_images) override {
+                    int64_t /*swapchainFormat*/, const std::map<std::string, MediaFrame&>& mono_images, const std::map<std::string, MediaFrame&>& stereo_images) override {
         CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
 
         auto swapchainContext = m_swapchainImageContextMap[swapchainImage];
@@ -1704,17 +1706,17 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
         for (auto container: {mono_images, stereo_images}) {
             for (auto &pair: container) {
-                const cv::Mat &image = pair.second;
-                if (image.empty()) {
-                    Log::Write(Log::Level::Error, "RenderView: Empty image");
-                    continue;
-                }
+                MediaFrame& image = pair.second;
+//                if (image.empty()) {
+//                    Log::Write(Log::Level::Error, "RenderView: Empty image");
+//                    continue;
+//                }
 
                 auto pipelineScreenLayout = m_pipelineScreenLayouts[pair.first].get();
 
-                std::vector<cv::Mat> images;
+                //std::vector<cv::Mat> images;
 
-                cv::split(image, images);
+                //cv::split(image, images);
                 // Compute the view-projection transform.
                 // Note all matrixes (including OpenXR's) are column-major, right-handed.
                 //pipelineScreenLayout->m_pose.position.z = pipelineScreenLayout->m_disdance;
@@ -1743,21 +1745,24 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                 // update uniformBuffer
                 memcpy(pipelineScreenLayout->uniformBufferMapped, &mvp, sizeof(mvp));
 
-                uint32_t total_size = image.cols * image.rows;
-                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_y, images[0].data, total_size);
-                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_u, images[1].data, total_size);
-                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_v, images[2].data, total_size);
+                uint32_t y_size = image.width * image.height;
+                uint32_t uv_size = y_size / 4;
+                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_y, image.data, y_size);
+                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_u, image.data + y_size, uv_size);
+                memcpy(pipelineScreenLayout->yuvBufferMemoryMapped_v, image.data + y_size + uv_size, uv_size);
+                
+                image.Release();
 
                 //copy image
                 copyBufferToImage(pipelineScreenLayout->yuvBuffer_y,
                                   pipelineScreenLayout->textureImage_y,
-                                  image.cols, image.rows);
+                                  image.width, image.height);
                 copyBufferToImage(pipelineScreenLayout->yuvBuffer_u,
                                   pipelineScreenLayout->textureImage_u,
-                                  image.cols, image.rows);
+                                  image.width / 2, image.height / 2);
                 copyBufferToImage(pipelineScreenLayout->yuvBuffer_v,
                                   pipelineScreenLayout->textureImage_v,
-                                  image.cols, image.rows);
+                                  image.width / 2, image.height / 2);
 
                 vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
                 vkCmdBindDescriptorSets(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS,

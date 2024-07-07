@@ -8,7 +8,6 @@
 extern "C" {
 #endif
 
-#define GST_AMC_IGNORE_UNKNOWN_COLOR_FORMATS 1
 /* XXX: Workaround for Android <21 making signal() an inline function
  * around bsd_signal(), and Android >= 21 not having any bsd_signal()
  * symbol but only signal().

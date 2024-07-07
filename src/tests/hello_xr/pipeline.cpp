@@ -5,8 +5,16 @@
 #include <gst/app/gstappsink.h>
 #include <gst/gstbus.h>
 #include "logger.h"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include "decoder.h"
 
 #include "common.h"
+
+
 
 namespace quest_teleop {
     namespace {
@@ -125,8 +133,14 @@ namespace quest_teleop {
     Pipeline::Pipeline(const StreamConfig &streamConfig) : m_streamConfig{streamConfig}, m_width{-1}, m_height{-1} {
         // Onstructing pipeline string
         auto portStr = std::to_string(m_streamConfig.port);
-        //std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert name=videoconvert"+ portStr +" ! vulkanupload ! vulkanconvert ! video/x-raw(memory:VulkanImage),format=RGBA ! appsink name=appsink" + portStr;
-        std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! h264parse ! amcviddec-omxqcomvideodecoderavc name=decoder"+ portStr +" ! appsink name=appsink" + portStr; /*glcolorconvert ! gldownload !*/
+        //std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! decodebin3 ! videoconvert name=videoconvert"+ portStr +" ! vulkanupload ! vulkanconvert ! video/x-raw(memory:VulkanImage),format=RGBA ! appsink name=appsink ! amcviddec-omxqcomvideodecoderavc" + portStr;
+        //Create a named pipe
+        //int        
+        m_width = m_streamConfig.width;
+        m_height = m_streamConfig.height;
+        m_decoder = std::make_unique<Decoder>(m_width, m_height);
+        
+        std::string pipeline = "udpsrc port=" + portStr + " caps=\"application/x-rtp,media=video,clock-rate=90000,payload=96,encoding-name=H264\" ! rtph264depay ! video/x-h264,stream-format=byte-stream,alignment=(string)nal ! h264parse ! queue ! appsink name=appsink" + portStr;
         Log::Write(Log::Level::Info, "Created context");
         m_dataContext = g_main_context_new();
         g_main_context_push_thread_default(m_dataContext);
@@ -150,14 +164,6 @@ namespace quest_teleop {
             Log::Write(Log::Level::Error, "couldn't find appsink");
         }
 
-        std::string videoConvertStr = "decoder" + portStr;
-        m_vc_factory =
-                gst_bin_get_by_name((GstBin * )(m_pipeline), videoConvertStr.c_str());
-        if (!m_vc_factory) {
-            Log::Write(Log::Level::Error,
-                       "Couldn't find decoder factory element");
-        }
-
         Log::Write(Log::Level::Info, "Setting pipeline to playing");
         /* Start playing */
         auto ret = gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
@@ -167,13 +173,6 @@ namespace quest_teleop {
         } else {
             Log::Write(Log::Level::Info, "Pipeline is playing");
             
-            m_vc_factory =
-                    gst_bin_get_by_name((GstBin * )(m_pipeline), videoConvertStr.c_str());
-            if (!m_vc_factory) {
-                Log::Write(Log::Level::Error,
-                           "Couldn't find decoder factory element after playing started");
-            }
-
             Log::Write(Log::Level::Info, "First query");
             /* Wait until error or EOS */
             m_bus = gst_element_get_bus(m_pipeline);
@@ -303,47 +302,18 @@ namespace quest_teleop {
                                          (GstMessageType)(GST_MESSAGE_ERROR |
                                                           GST_MESSAGE_EOS));
 
-            
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                if (m_samples.size() > kMaxSamples) {
-                    m_samples.pop_front();
-                }
-                m_samples.emplace_back();
-            }
-            
-
-            SampleRead &sampleRead = m_samples.back();
+            SampleRead &sampleRead = m_decoder->get_new_sample();
             if (m_msg) {
                 if (GST_MESSAGE_TYPE(m_msg) == GST_MESSAGE_ERROR) {
                     Log::Write(Log::Level::Error, "An error occurred!");
                 }
-                for (int i = 0; i < 2; ++i) {
-                    sampleRead.images[i] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
-                                                   cv::Scalar(255, 255, 0));
-                    cv::putText(sampleRead.images[i], "Error or End Video",
-                                cv::Point(m_streamConfig.width/2, m_streamConfig.height/2),
-                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
-                                cv::LINE_AA);
-                }
 
+                m_decoder->delete_newly_created_sample();
                 gst_message_unref(m_msg);
             } else {
-                //Log::Write(Log::Level::Info, "Getting sample");
                 sampleRead.sample = gst_app_sink_pull_sample(m_appSink);
                 //timeRecorder.LogElapsedTime("Getting a sample took ");
                 if (sampleRead.sample) {
-                    //Log::Write(Log::Level::Info, "getting buffer");
-                    GstBufferList *bufferList = gst_sample_get_buffer_list(sampleRead.sample);
-                    //timeRecorder.LogElapsedTime("Getting a buffer list took ");
-                    if (bufferList) {
-                        auto totalSize = gst_buffer_list_calculate_size(bufferList);
-                        auto length = gst_buffer_list_length(bufferList);
-                        std::stringstream ss;
-                        ss << "Total size of the sample is: " << totalSize
-                           << ". Length of the list is: " << length << ".";
-                        //Log::Write(Log::Level::Info, ss.str());
-                    }
                     sampleRead.buffer = gst_sample_get_buffer(sampleRead.sample);
                     //timeRecorder.LogElapsedTime("Getting a buffer sample took ");
                     if (sampleRead.buffer) {
@@ -351,53 +321,11 @@ namespace quest_teleop {
 
                         sampleRead.mapped = gst_buffer_map(sampleRead.buffer, &sampleRead.info,
                                                            GST_MAP_READ);
-                        //timeRecorder.LogElapsedTime("Mapping buffer took ");
-                        if (sampleRead.mapped) {
-                            if (m_width == -1) {
-                                Log::Write(Log::Level::Warning,
-                                           "Width and height not set");
-                                SetVideoSize();
-                                // Log the width and height
-                                Log::Write(Log::Level::Info,
-                                           "Width: " + std::to_string(m_width) +
-                                           " Height: " + std::to_string(m_height));
-                            }
-                            
-                            // Case of RGB image.
-                            if (sampleRead.info.size != m_width * m_height * 1.5) {
-                                Log::Write(Log::Level::Error,
-                                           Fmt("Size of the buffer is not as expected. Size is %d.", sampleRead.info.size));
-                                throw std::runtime_error(
-                                        "Size of the buffer is not as expected");
-                            }
-                            Log::Write(Log::Level::Info,
-                                       "Got a sample");
-                            if (m_streamConfig.type == StreamType::Mono || m_streamConfig.side != PipelineSide::Both) {
-                                sampleRead.images[static_cast<int>(m_streamConfig.side)] = cv::Mat(cv::Size(m_width, m_height), CV_8UC3, sampleRead.info.data);
-
-                            } else {
-                                cv::Mat image = cv::Mat(cv::Size(m_width, m_height), CV_8UC3, sampleRead.info.data);
-                                sampleRead.images[static_cast<int>(PipelineSide::Left)] = image(cv::Rect(0, 0, m_width / 2, m_height));
-                                sampleRead.images[static_cast<int>(PipelineSide::Right)] = image(cv::Rect(m_width / 2, 0, m_width / 2, m_height));
-                            }
-
-                        }
                     }
                 }
 
                 if (!sampleRead.sample || !sampleRead.buffer || !sampleRead.mapped) {
-                    sampleRead.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
-                                               cv::Scalar(0, 0, 200));
-                    sampleRead.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
-                                                   cv::Scalar(0, 0, 200));
-                    cv::putText(sampleRead.images[static_cast<int>(PipelineSide::Left)], "[left]"+ m_streamConfig.name,
-                                cv::Point(250, 250),
-                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
-                                cv::LINE_AA);
-                    cv::putText(sampleRead.images[static_cast<int>(PipelineSide::Right)], "[right]"+ m_streamConfig.name,
-                                cv::Point(250, 250),
-                                cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
-                                cv::LINE_AA);
+                    m_decoder->delete_newly_created_sample();
                 }
             }
 
@@ -405,35 +333,39 @@ namespace quest_teleop {
         g_vm->DetachCurrentThread();
     }
 
-    cv::Mat &Pipeline::GetImage(PipelineSide side) {
-        //Log::Write(Log::Level::Info,m_streamConfig.name + " Getting image");
-        if (m_streamConfig.side != PipelineSide::Both) {
-            side = m_streamConfig.side;
-        }
-        //TimeRecorder timeRecorder = TimeRecorder(true);
-        std::lock_guard<std::mutex> lock(m_mutex);
-        //timeRecorder.LogElapsedTime("Locking in getImage took ");
-        if (m_samples.size() <= 1) {
-            Log::Write(Log::Level::Info,m_streamConfig.name + "Pushing fictional image");
-            m_samples.emplace_front();
-            SampleRead &sample = m_samples.front();
-            sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
-                                   cv::Scalar(0, 0, 200));
-            sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
-                                      cv::Scalar(0, 0, 200));
-            cv::putText(sample.images[static_cast<int>(PipelineSide::Left)], "[left]"+ m_streamConfig.name,
-                        cv::Point(250, 250),
-                        cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
-                        cv::LINE_AA);
-            cv::putText(sample.images[static_cast<int>(PipelineSide::Right)], "[right]"+ m_streamConfig.name,
-                        cv::Point(250, 250),
-                        cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
-                        cv::LINE_AA);
-        }
-        while (m_samples.size() > 2 && ((side == PipelineSide::Left && m_streamConfig.side == PipelineSide::Both) || m_streamConfig.side != PipelineSide::Both)) {
-            m_samples.pop_front();
-        }
-        auto &image = m_samples.front().images[static_cast<int>(side)];
-        return image;
+//    cv::Mat &Pipeline::GetImage(PipelineSide side) {
+//        //Log::Write(Log::Level::Info,m_streamConfig.name + " Getting image");
+//        if (m_streamConfig.side != PipelineSide::Both) {
+//            side = m_streamConfig.side;
+//        }
+//        //TimeRecorder timeRecorder = TimeRecorder(true);
+//        std::lock_guard<std::mutex> lock(m_mutex);
+//        //timeRecorder.LogElapsedTime("Locking in getImage took ");
+//        if (m_samples.size() <= 1) {
+//            Log::Write(Log::Level::Info,m_streamConfig.name + "Pushing fictional image");
+//            m_samples.emplace_front();
+//            SampleRead &sample = m_samples.front();
+//            sample.images[static_cast<int>(PipelineSide::Left)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
+//                                   cv::Scalar(0, 0, 200));
+//            sample.images[static_cast<int>(PipelineSide::Right)] = cv::Mat(cv::Size(m_streamConfig.width, m_streamConfig.height), CV_8UC3,
+//                                      cv::Scalar(0, 0, 200));
+//            cv::putText(sample.images[static_cast<int>(PipelineSide::Left)], "[left]"+ m_streamConfig.name,
+//                        cv::Point(250, 250),
+//                        cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
+//                        cv::LINE_AA);
+//            cv::putText(sample.images[static_cast<int>(PipelineSide::Right)], "[right]"+ m_streamConfig.name,
+//                        cv::Point(250, 250),
+//                        cv::FONT_HERSHEY_SIMPLEX, 5, cv::Scalar(255, 0, 0), 4,
+//                        cv::LINE_AA);
+//        }
+//        while (m_samples.size() > 2 && ((side == PipelineSide::Left && m_streamConfig.side == PipelineSide::Both) || m_streamConfig.side != PipelineSide::Both)) {
+//            m_samples.pop_front();
+//        }
+//        auto &image = m_samples.front().images[static_cast<int>(side)];
+//        return image;
+//    }
+
+    MediaFrame& Pipeline::get_media_frame() {
+        return m_decoder->getFrame();    
     }
 } // namespace quest_teleop
